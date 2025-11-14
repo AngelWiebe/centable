@@ -1,33 +1,21 @@
-import React, { useState, useEffect, useCallback, useMemo } from "react";
-import { View, FlatList, Alert, Text, Button, StyleSheet } from "react-native";
+import React, { useCallback, useMemo, useState } from "react";
+import { Alert, Button, FlatList, StyleSheet, View } from "react-native";
 
-import { IncomeInterface } from "../../types/income";
+import useBudgetStore from "../../app/store/useBudgetStore";
 import FinancialForm from "../../components/FinancialForm";
 import ListItem from "../../components/ListItem";
-import useBudgetStore from "../../app/store/useBudgetStore";
+import { Colors } from "../../constants/Colors";
+import { IncomeInterface } from "../../types/income";
 
 const Incomes: React.FC = React.memo(() => {
-  const incomes = useBudgetStore((state) => state.incomes);
-  const addOrUpdateIncome = useBudgetStore((state) => state.addOrUpdateIncome);
-  const deleteIncome = useBudgetStore((state) => state.deleteIncome);
-  const loadIncomes = useBudgetStore((state) => state.loadIncomes);
+  const { incomes, addOrUpdateIncome, deleteIncome, settings } =
+    useBudgetStore();
+  const colorScheme = settings?.theme === "dark" ? Colors.dark : Colors.light;
 
   const [incomeForm, setIncomeForm] = useState<Partial<IncomeInterface>>({});
   const [isEditing, setIsEditing] = useState<boolean>(false);
   const [showForm, setShowForm] = useState<boolean>(false);
   const [showDatePicker, setShowDatePicker] = useState<boolean>(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const load = async () => {
-      try {
-        await loadIncomes();
-      } catch (e) {
-        setError("Failed to load incomes. Please try again later.");
-      }
-    };
-    load();
-  }, [loadIncomes]);
 
   const handleAddOrUpdateIncome = useCallback(async () => {
     if (
@@ -47,7 +35,8 @@ const Incomes: React.FC = React.memo(() => {
       };
     }
 
-    await addOrUpdateIncome(incomeForm, frequency, isEditing);
+    await addOrUpdateIncome({ ...incomeForm, frequency });
+
     resetForm();
   }, [incomeForm, isEditing, addOrUpdateIncome]);
 
@@ -87,7 +76,7 @@ const Incomes: React.FC = React.memo(() => {
         ]
       );
     },
-    [deleteIncome]
+    [deleteIncome, refreshBudgets]
   );
 
   const renderIncomeItem = useCallback(
@@ -103,17 +92,13 @@ const Incomes: React.FC = React.memo(() => {
 
   const memoizedIncomes = useMemo(() => incomes, [incomes]);
 
-  if (error) {
-    return (
-      <View style={styles.errorContainer}>
-        <Text style={styles.errorText}>{error}</Text>
-        <Button title="Retry" onPress={loadIncomes} />
-      </View>
-    );
-  }
-
   return (
-    <View style={styles.container}>
+    <View
+      style={[
+        styles.container,
+        { backgroundColor: colorScheme.cardBackground },
+      ]}
+    >
       {showForm ? (
         <FinancialForm
           formData={incomeForm}
@@ -156,20 +141,12 @@ const styles = StyleSheet.create({
   },
   buttonContainer: {
     marginBottom: 5,
+    borderRadius: 8,
+    overflow: "hidden",
   },
   listContent: {
     marginTop: 10,
     paddingBottom: 20,
-  },
-  errorContainer: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  errorText: {
-    color: "red",
-    textAlign: "center",
-    marginBottom: 10,
   },
 });
 

@@ -1,7 +1,7 @@
 import { openDatabaseAsync, SQLiteDatabase } from "expo-sqlite";
 import uuid from "react-native-uuid";
 
-import { StoredBudget } from "@/types/budget";
+import { StoredBudget } from "../types/budget";
 import { ExpenseInterface } from "../types/expense";
 import { FrequencyInterface } from "../types/frequency";
 import { IncomeInterface } from "../types/income";
@@ -22,7 +22,7 @@ type BudgetRow = {
   date: string;
   income_id: string;
   remaining_balance: number;
-}
+};
 
 type ExpenseRow = {
   expense_id: string;
@@ -135,7 +135,7 @@ export const addOrUpdateIncome = async (income: Partial<IncomeInterface>) => {
       income.name!,
       income.date!.toISOString(),
       income.amount!,
-      income.frequency ? JSON.stringify(income.frequency) : null
+      income.frequency ? JSON.stringify(income.frequency) : null,
     ]
   );
 
@@ -150,22 +150,29 @@ export const getIncomes = async (): Promise<IncomeInterface[]> => {
 
   const result = await db.getAllAsync<DataRow>("SELECT * FROM incomes;", []);
 
-  return result.map(row => ({
+  return result.map((row) => ({
     id: row.id,
     name: row.name,
     date: new Date(row.date),
     amount: row.amount,
-    frequency: row.frequency ? JSON.parse(row.frequency) as FrequencyInterface : undefined
+    frequency: row.frequency
+      ? (JSON.parse(row.frequency) as FrequencyInterface)
+      : undefined,
   }));
 };
 
 /**
  * Retrieves a single income record by ID.
  */
-export const getIncomeById = async (id: string): Promise<IncomeInterface | null> => {
+export const getIncomeById = async (
+  id: string
+): Promise<IncomeInterface | null> => {
   if (!db) return null;
 
-  const result = await db.getFirstAsync<DataRow>("SELECT * FROM incomes WHERE id = ?;", [id]);
+  const result = await db.getFirstAsync<DataRow>(
+    "SELECT * FROM incomes WHERE id = ?;",
+    [id]
+  );
   if (!result) return null;
 
   return {
@@ -173,7 +180,9 @@ export const getIncomeById = async (id: string): Promise<IncomeInterface | null>
     name: result.name,
     date: new Date(result.date),
     amount: result.amount,
-    frequency: result.frequency ? JSON.parse(result.frequency) as FrequencyInterface : undefined
+    frequency: result.frequency
+      ? (JSON.parse(result.frequency) as FrequencyInterface)
+      : undefined,
   };
 };
 
@@ -200,11 +209,10 @@ export const updateIncome = async (income: IncomeInterface) => {
       income.date.toISOString(),
       income.amount,
       income.frequency ? JSON.stringify(income.frequency) : null,
-      income.id
+      income.id,
     ]
   );
 };
-
 
 //
 // ─── EXPENSE CRUD OPERATIONS ────────────────────────────────────────────────────
@@ -213,7 +221,9 @@ export const updateIncome = async (income: IncomeInterface) => {
 /**
  * Inserts or updates an expense record in the database.
  */
-export const addOrUpdateExpense = async (expense: Partial<ExpenseInterface>) => {
+export const addOrUpdateExpense = async (
+  expense: Partial<ExpenseInterface>
+) => {
   if (!db) return;
 
   const expenseId = expense.id ?? uuid.v4().toString();
@@ -231,7 +241,7 @@ export const addOrUpdateExpense = async (expense: Partial<ExpenseInterface>) => 
       expense.name!,
       expense.date!.toISOString(),
       expense.amount!,
-      expense.frequency ? JSON.stringify(expense.frequency) : null
+      expense.frequency ? JSON.stringify(expense.frequency) : null,
     ]
   );
 
@@ -246,22 +256,29 @@ export const getExpenses = async (): Promise<ExpenseInterface[]> => {
 
   const result = await db.getAllAsync<DataRow>("SELECT * FROM expenses;", []);
 
-  return result.map(row => ({
+  return result.map((row) => ({
     id: row.id,
     name: row.name,
     date: new Date(row.date),
     amount: row.amount,
-    frequency: row.frequency ? JSON.parse(row.frequency) as FrequencyInterface : undefined
+    frequency: row.frequency
+      ? (JSON.parse(row.frequency) as FrequencyInterface)
+      : undefined,
   }));
 };
 
 /**
  * Retrieves a single expense record by ID.
  */
-export const getExpenseById = async (id: string): Promise<ExpenseInterface | null> => {
+export const getExpenseById = async (
+  id: string
+): Promise<ExpenseInterface | null> => {
   if (!db) return null;
 
-  const result = await db.getFirstAsync<DataRow>("SELECT * FROM expenses WHERE id = ?;", [id]);
+  const result = await db.getFirstAsync<DataRow>(
+    "SELECT * FROM expenses WHERE id = ?;",
+    [id]
+  );
 
   if (!result) return null;
 
@@ -270,7 +287,9 @@ export const getExpenseById = async (id: string): Promise<ExpenseInterface | nul
     name: result.name,
     date: new Date(result.date),
     amount: result.amount,
-    frequency: result.frequency ? JSON.parse(result.frequency) as FrequencyInterface : undefined
+    frequency: result.frequency
+      ? (JSON.parse(result.frequency) as FrequencyInterface)
+      : undefined,
   };
 };
 
@@ -297,7 +316,7 @@ export const updateExpense = async (expense: ExpenseInterface) => {
       expense.date.toISOString(),
       expense.amount,
       expense.frequency ? JSON.stringify(expense.frequency) : null,
-      expense.id
+      expense.id,
     ]
   );
 };
@@ -327,16 +346,15 @@ export const addOrUpdateBudget = async (budget: StoredBudget) => {
         budget.date,
         budget.amount, // Ensure amount is included
         budget.income.id,
-        budget.remainingBalance
+        budget.remainingBalance,
       ]
-    );    
+    );
   } catch (error) {
     console.error("❌ ERROR inserting budget:", error);
   }
 
   for (let index = 0; index < budget.bills.length; index++) {
     const bill = budget.bills[index];
-  
     await db.runAsync(
       `INSERT INTO budget_expenses (id, budget_id, expense_id, paid, amount, sort_order) 
        VALUES (?, ?, ?, ?, ?, ?) 
@@ -346,15 +364,14 @@ export const addOrUpdateBudget = async (budget: StoredBudget) => {
         budgetId,
         bill.expense.id,
         bill.paid ? 1 : 0,
-        bill.expense.amount,
+        bill.amount,
         index, // Sort order
         bill.paid ? 1 : 0,
-        bill.expense.amount,
-        index
+        bill.amount,
+        index,
       ]
     );
   }
-  
 
   return budgetId;
 };
@@ -365,51 +382,69 @@ export const addOrUpdateBudget = async (budget: StoredBudget) => {
 export const getBudgets = async (): Promise<StoredBudget[]> => {
   if (!db) return [];
 
-  // Fetch all budgets from the database
-  const budgetsResult = await db.getAllAsync<BudgetRow>("SELECT * FROM budgets;", []);
-  const budgets: StoredBudget[] = [];
+  try {
+    // Fetch all budgets from the database
+    const budgetsResult = await db.getAllAsync<BudgetRow>(
+      "SELECT * FROM budgets;",
+      []
+    );
+    const budgets: StoredBudget[] = [];
 
-  for (const row of budgetsResult) {
-    // Fetch related income
-    const income = await getIncomeById(row.income_id);
+    for (const row of budgetsResult) {
+      // Fetch related income
+      const match = row.income_id.match(/^([a-f0-9-]{36})/);
+      const baseId = match ? match[1] : row.income_id;
+
+      const income = await getIncomeById(baseId);
       if (!income) continue;
 
-    // Fetch related expenses for this budget
-    const expensesResult = await db.getAllAsync<ExpenseRow>(
-      "SELECT * FROM budget_expenses WHERE budget_id = ? ORDER BY sort_order ASC;",
-      [row.id]
-    );
+      // Fetch related expenses for this budget
+      const expensesResult = await db.getAllAsync<ExpenseRow>(
+        "SELECT * FROM budget_expenses WHERE budget_id = ? ORDER BY sort_order ASC;",
+        [row.id]
+      );
 
-    // TODO: change the amount used here or manual changes will be overwritten
-    const bills = [];
-    for (const expenseRow of expensesResult) {
-      const expense = await getExpenseById(expenseRow.expense_id);
-      if (!expense) continue;
+      // TODO: change the amount used here or manual changes will be overwritten
+      const bills = [];
+      for (const expenseRow of expensesResult) {
+        const match = expenseRow.expense_id.match(/^([a-f0-9-]{36})/);
+        const baseId = match ? match[1] : expenseRow.expense_id;
 
-      bills.push({ ...expenseRow, expense, paid: expenseRow.paid === 1 });
+        const expense = await getExpenseById(baseId);
+        if (!expense) continue;
+
+        bills.push({ ...expenseRow, expense, paid: expenseRow.paid === 1 });
+      }
+
+      budgets.push({
+        id: row.id,
+        date: row.date,
+        income,
+        amount: row.amount,
+        bills,
+        remainingBalance: row.remaining_balance,
+      });
     }
 
-    budgets.push({
-      id: row.id,
-      date: row.date,
-      income,
-      amount: row.amount,
-      bills,
-      remainingBalance: row.remaining_balance
-    });
+    return budgets;
+  } catch (e) {
+    console.error(e);
   }
-
-  return budgets;
 };
 
 /**
  * Retrieves a single budget record by ID.
  */
-export const getBudgetById = async (id: string): Promise<StoredBudget | null> => {
+export const getBudgetById = async (
+  id: string
+): Promise<StoredBudget | null> => {
   if (!db) return null;
 
   // Fetch the budget
-  const budgetResult = await db.getFirstAsync<BudgetRow>("SELECT * FROM budgets WHERE id = ?;", [id]);
+  const budgetResult = await db.getFirstAsync<BudgetRow>(
+    "SELECT * FROM budgets WHERE id = ?;",
+    [id]
+  );
   if (!budgetResult) return null;
 
   // Fetch the related income
@@ -438,7 +473,7 @@ export const getBudgetById = async (id: string): Promise<StoredBudget | null> =>
     income,
     amount,
     bills,
-    remainingBalance: budgetResult.remaining_balance
+    remainingBalance: budgetResult.remaining_balance,
   };
 };
 
@@ -468,25 +503,33 @@ export const clearAllBudgets = async () => {
 export const clearAllBudgetExpenses = async (budgetId: string) => {
   if (!db) return;
 
-  await db.runAsync("DELETE FROM budget_expenses where budget_id=?;", [budgetId]);
+  await db.runAsync("DELETE FROM budget_expenses where budget_id=?;", [
+    budgetId,
+  ]);
 };
 
 /**
  * Deletes an expense from a budget.
  */
-export const deleteExpenseFromBudgetInDB = async (rowId: string, budgetId: string) => {
+export const deleteExpenseFromBudgetInDB = async (
+  rowId: string,
+  budgetId: string
+) => {
   if (!db) return;
 
-  await db.runAsync("DELETE FROM budget_expenses WHERE budget_id = ? AND id = ?;", [
-    budgetId,
-    rowId
-  ]);
+  await db.runAsync(
+    "DELETE FROM budget_expenses WHERE budget_id = ? AND id = ?;",
+    [budgetId, rowId]
+  );
 };
 
 /**
  * Retrieves the paid status of an expense.
  */
-export const getPaidStatusFromDB = async (budgetId: string, rowId: string): Promise<boolean> => {
+export const getPaidStatusFromDB = async (
+  budgetId: string,
+  rowId: string
+): Promise<boolean> => {
   if (!db) return false;
 
   const result = await db.getFirstAsync<ExpenseRow>(
@@ -500,7 +543,13 @@ export const getPaidStatusFromDB = async (budgetId: string, rowId: string): Prom
 /**
  * Moves an expense from one budget to another.
  */
-export const moveExpenseBetweenBudgetsInDB = async (fromBudgetId: string, expenseId: string, toBudgetId: string, rowId: string, amount: number) => {
+export const moveExpenseBetweenBudgetsInDB = async (
+  fromBudgetId: string,
+  expenseId: string,
+  toBudgetId: string,
+  rowId: string,
+  amount: number
+) => {
   if (!db) return;
 
   // Remove from old budget
@@ -521,11 +570,14 @@ export const moveExpenseBetweenBudgetsInDB = async (fromBudgetId: string, expens
   );
 };
 
-
 /**
  * Updates the paid status of an expense in a budget.
  */
-export const setPaidStatusInDB = async (budgetId: string, rowId: string, isPaid: boolean) => {
+export const setPaidStatusInDB = async (
+  budgetId: string,
+  rowId: string,
+  isPaid: boolean
+) => {
   if (!db) return;
 
   await db.runAsync(
@@ -537,17 +589,25 @@ export const setPaidStatusInDB = async (budgetId: string, rowId: string, isPaid:
 /**
  * Toggles the paid status of an expense.
  */
-export const toggleExpensePaidInDB = async (budgetId: string, expenseId: string) => {
+export const toggleExpensePaidInDB = async (
+  budgetId: string,
+  expenseId: string
+) => {
   if (!db) return;
 
   const currentStatus = await getPaidStatusFromDB(budgetId, expenseId);
   await setPaidStatusInDB(budgetId, expenseId, !currentStatus);
+  return !currentStatus;
 };
 
 /**
  * Updates an expense amount in a budget.
  */
-export const updateExpenseAmountInDB = async (budgetId: string, rowId: string, newAmount: number) => {
+export const updateExpenseAmountInDB = async (
+  budgetId: string,
+  rowId: string,
+  newAmount: number
+) => {
   if (!db) return;
 
   await db.runAsync(
@@ -556,11 +616,13 @@ export const updateExpenseAmountInDB = async (budgetId: string, rowId: string, n
   );
 };
 
-
 /**
  * Updates the order of expenses in a budget.
  */
-export const updateExpenseOrderInDB = async (budgetId: string, newOrder: ExpenseRow[]) => {
+export const updateExpenseOrderInDB = async (
+  budgetId: string,
+  newOrder: ExpenseRow[]
+) => {
   if (!db) return;
 
   for (let index = 0; index < newOrder.length; index++) {
@@ -576,14 +638,16 @@ export const updateExpenseOrderInDB = async (budgetId: string, newOrder: Expense
 /**
  * Updates the income amount in a budget.
  */
-export const updateIncomeAmountInDB = async (budgetId: string, newAmount: number) => {
+export const updateIncomeAmountInDB = async (
+  budgetId: string,
+  newAmount: number
+) => {
   if (!db) return;
-  
-    await db.runAsync(
-      "UPDATE budgets SET amount = ? WHERE id = ?",
-      [newAmount, budgetId]
-    );
-  
+
+  await db.runAsync("UPDATE budgets SET amount = ? WHERE id = ?", [
+    newAmount,
+    budgetId,
+  ]);
 };
 
 /**
@@ -612,13 +676,15 @@ export const updateTheme = async (theme: "light" | "dark") => {
  * Retrieves user settings.
  */
 export const getSettings = async (): Promise<{
-  currency: string; theme: "dark" | "light" }> => {
+  currency: string;
+  theme: "dark" | "light";
+}> => {
   if (!db) return { currency: "CAD", theme: "dark" };
 
-  const result = await db.getFirstAsync<{ currency: string; theme: "dark" | "light"  }>(
-    "SELECT currency, theme FROM settings WHERE id = ?;",
-    ["settings_id"]
-  );
+  const result = await db.getFirstAsync<{
+    currency: string;
+    theme: "dark" | "light";
+  }>("SELECT currency, theme FROM settings WHERE id = ?;", ["settings_id"]);
 
   return result ?? { currency: "CAD", theme: "dark" };
 };
