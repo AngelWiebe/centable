@@ -240,7 +240,9 @@ const BudgetItem: React.FC<BudgetItemProps> = ({ budget }) => {
   };
 
   const totalExpenses = bills.reduce((sum, { amount }) => sum + amount, 0);
-  const remainingBalance = budget.income.amount - totalExpenses;
+  // Use budget.remainingBalance which is already calculated and stored in the database
+  // Fallback to calculated value if not available
+  const remainingBalance = budget.remainingBalance ?? (budget.amount - totalExpenses);
 
   return (
     <View

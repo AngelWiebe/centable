@@ -332,9 +332,10 @@ export const addOrUpdateBudget = async (budget: StoredBudget) => {
 
   try {
     // Ensure date is a string (ISO format)
-    const dateString = typeof budget.date === 'string' 
-      ? budget.date 
-      : new Date(budget.date).toISOString();
+    const dateString =
+      typeof budget.date === "string"
+        ? budget.date
+        : new Date(budget.date).toISOString();
 
     await db.runAsync(
       `INSERT INTO budgets (id, date, amount, income_id, remaining_balance) 
@@ -530,6 +531,26 @@ export const deleteExpenseFromBudgetInDB = async (
     "DELETE FROM budget_expenses WHERE budget_id = ? AND id = ?;",
     [budgetId, rowId]
   );
+
+  // Recalculate remaining_balance for the budget
+  const budgetResult = await db.getFirstAsync<{ amount: number }>(
+    "SELECT amount FROM budgets WHERE id = ?;",
+    [budgetId]
+  );
+
+  if (budgetResult) {
+    const expensesResult = await db.getAllAsync<{ amount: number }>(
+      "SELECT amount FROM budget_expenses WHERE budget_id = ?;",
+      [budgetId]
+    );
+    const totalExpenses = expensesResult.reduce((sum, e) => sum + e.amount, 0);
+    const remainingBalance = budgetResult.amount - totalExpenses;
+
+    await db.runAsync(
+      "UPDATE budgets SET remaining_balance = ? WHERE id = ?;",
+      [remainingBalance, budgetId]
+    );
+  }
 };
 
 /**
@@ -623,6 +644,26 @@ export const updateExpenseAmountInDB = async (
     "UPDATE budget_expenses SET amount = ? WHERE budget_id = ? AND id = ?;",
     [newAmount, budgetId, rowId]
   );
+
+  // Recalculate remaining_balance for the budget
+  const budgetResult = await db.getFirstAsync<{ amount: number }>(
+    "SELECT amount FROM budgets WHERE id = ?;",
+    [budgetId]
+  );
+
+  if (budgetResult) {
+    const expensesResult = await db.getAllAsync<{ amount: number }>(
+      "SELECT amount FROM budget_expenses WHERE budget_id = ?;",
+      [budgetId]
+    );
+    const totalExpenses = expensesResult.reduce((sum, e) => sum + e.amount, 0);
+    const remainingBalance = budgetResult.amount - totalExpenses;
+
+    await db.runAsync(
+      "UPDATE budgets SET remaining_balance = ? WHERE id = ?;",
+      [remainingBalance, budgetId]
+    );
+  }
 };
 
 /**
@@ -653,10 +694,18 @@ export const updateIncomeAmountInDB = async (
 ) => {
   if (!db) return;
 
-  await db.runAsync("UPDATE budgets SET amount = ? WHERE id = ?", [
-    newAmount,
-    budgetId,
-  ]);
+  // Get current total expenses to recalculate remaining_balance
+  const expensesResult = await db.getAllAsync<{ amount: number }>(
+    "SELECT amount FROM budget_expenses WHERE budget_id = ?;",
+    [budgetId]
+  );
+  const totalExpenses = expensesResult.reduce((sum, e) => sum + e.amount, 0);
+  const remainingBalance = newAmount - totalExpenses;
+
+  await db.runAsync(
+    "UPDATE budgets SET amount = ?, remaining_balance = ? WHERE id = ?",
+    [newAmount, remainingBalance, budgetId]
+  );
 };
 
 /**
