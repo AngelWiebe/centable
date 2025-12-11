@@ -44,8 +44,6 @@ export const resetTables = async () => {
       DROP TABLE IF EXISTS settings;
     `);
 
-    console.log("✅ Tables dropped successfully.");
-
     // Recreate tables
     await setupDatabase();
     console.log("✅ Tables recreated successfully.");
@@ -333,6 +331,11 @@ export const addOrUpdateBudget = async (budget: StoredBudget) => {
   const budgetId = budget.id ?? uuid.v4().toString();
 
   try {
+    // Ensure date is a string (ISO format)
+    const dateString = typeof budget.date === 'string' 
+      ? budget.date 
+      : new Date(budget.date).toISOString();
+
     await db.runAsync(
       `INSERT INTO budgets (id, date, amount, income_id, remaining_balance) 
        VALUES (?, ?, ?, ?, ?) 
@@ -343,34 +346,40 @@ export const addOrUpdateBudget = async (budget: StoredBudget) => {
          remaining_balance = excluded.remaining_balance;`,
       [
         budget.id,
-        budget.date,
-        budget.amount, // Ensure amount is included
+        dateString,
+        budget.amount,
         budget.income.id,
         budget.remainingBalance,
       ]
     );
+
+    // Insert budget expenses sequentially to avoid statement conflicts
+    for (let index = 0; index < budget.bills.length; index++) {
+      const bill = budget.bills[index];
+      try {
+        await db.runAsync(
+          `INSERT INTO budget_expenses (id, budget_id, expense_id, paid, amount, sort_order) 
+           VALUES (?, ?, ?, ?, ?, ?) 
+           ON CONFLICT(id) DO UPDATE SET paid = ?, amount = ?, sort_order = ?;`,
+          [
+            bill.id ?? uuid.v4().toString(),
+            budgetId,
+            bill.expense.id,
+            bill.paid ? 1 : 0,
+            bill.amount,
+            index, // Sort order
+            bill.paid ? 1 : 0,
+            bill.amount,
+            index,
+          ]
+        );
+      } catch (billError) {
+        console.error(`❌ ERROR inserting budget expense ${index}:`, billError);
+      }
+    }
   } catch (error) {
     console.error("❌ ERROR inserting budget:", error);
-  }
-
-  for (let index = 0; index < budget.bills.length; index++) {
-    const bill = budget.bills[index];
-    await db.runAsync(
-      `INSERT INTO budget_expenses (id, budget_id, expense_id, paid, amount, sort_order) 
-       VALUES (?, ?, ?, ?, ?, ?) 
-       ON CONFLICT(id) DO UPDATE SET paid = ?, amount = ?, sort_order = ?;`,
-      [
-        bill.id ?? uuid.v4().toString(),
-        budgetId,
-        bill.expense.id,
-        bill.paid ? 1 : 0,
-        bill.amount,
-        index, // Sort order
-        bill.paid ? 1 : 0,
-        bill.amount,
-        index,
-      ]
-    );
+    throw error; // Re-throw to allow caller to handle
   }
 
   return budgetId;

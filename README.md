@@ -1,50 +1,137 @@
-# Welcome to your Expo app 👋
+# Centable
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+A personal budget management mobile app built with React Native and Expo. Track your income, expenses, and budgets with ease.
 
-## Get started
+## Features
 
-1. Install dependencies
+- 💰 **Income & Expense Tracking**: Add and manage recurring or one-time income and expenses
+- 📊 **Budget Management**: Automatically generate budgets based on your income and expenses
+- 🔄 **Recurring Transactions**: Support for daily, weekly, monthly, and semi-monthly frequencies
+- 💾 **Local Storage**: All data stored locally using SQLite
+- 🎨 **Dark/Light Theme**: Automatic theme support
+- 📱 **Cross-Platform**: Works on iOS, Android, and Web
+
+## Tech Stack
+
+- **Framework**: Expo SDK 52
+- **Language**: TypeScript
+- **Navigation**: Expo Router (file-based routing)
+- **State Management**: Zustand
+- **Database**: Expo SQLite
+- **UI**: React Native with custom components
+
+## Getting Started
+
+### Prerequisites
+
+- Node.js (v18 or later)
+- npm or yarn
+- Expo CLI (optional, but recommended)
+- iOS Simulator (for iOS development) or Android Emulator (for Android development)
+
+### Installation
+
+1. Clone the repository
+
+   ```bash
+   git clone https://github.com/AngelWiebe/centable.git
+   cd centable
+   ```
+
+2. Install dependencies
 
    ```bash
    npm install
    ```
 
-2. Start the app
+3. Start the development server
 
    ```bash
-    npx expo start
+   npm start
+   # or
+   npx expo start
    ```
 
-In the output, you'll find options to open the app in a
+4. Run on your preferred platform
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
+   ```bash
+   # iOS
+   npm run ios
 
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
+   # Android
+   npm run android
 
-## Get a fresh project
+   # Web
+   npm run web
+   ```
 
-When you're ready, run:
+## Project Structure
 
-```bash
-npm run reset-project
+```
+centable/
+├── app/                    # Expo Router pages
+│   ├── (tabs)/            # Tab navigation screens
+│   │   ├── index.tsx      # Budget list (home)
+│   │   ├── incomes.tsx    # Income management
+│   │   ├── expenses.tsx   # Expense management
+│   │   ├── reports.tsx    # Reports and analytics
+│   │   └── settings.tsx   # App settings
+│   └── _layout.tsx        # Root layout
+├── components/            # Reusable components
+│   ├── BudgetItem.tsx     # Budget card component
+│   ├── BudgetList.tsx     # Budget list view
+│   ├── FinancialForm.tsx  # Income/expense form
+│   └── ...
+├── database/              # SQLite database operations
+│   └── database.ts        # Database CRUD functions
+├── app/store/             # Zustand state management
+│   └── useBudgetStore.ts  # Main app store
+├── types/                 # TypeScript type definitions
+├── utils/                 # Utility functions
+└── assets/                # Images, fonts, etc.
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+## Key Features Explained
 
-## Learn more
+### Budget Generation
 
-To learn more about developing your project with Expo, look at the following resources:
+Budgets are automatically generated based on your income and expense patterns. The app:
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+- Generates budgets for the next 3 months
+- Assigns expenses to budgets based on dates and available balance
+- Preserves manual edits (amounts, paid status) when refreshing
 
-## Join the community
+### Data Persistence
 
-Join our community of developers creating universal apps.
+All data is stored locally in SQLite:
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+- Incomes and expenses are saved immediately
+- Budget modifications persist across app restarts
+- Manual budget edits are preserved unless explicitly refreshed
+
+### Refresh Button
+
+The refresh button in the budget view recalculates budgets from scratch based on current income and expense data. Manual edits are preserved where possible.
+
+## Development
+
+### Available Scripts
+
+- `npm start` - Start Expo development server
+- `npm run android` - Run on Android emulator/device
+- `npm run ios` - Run on iOS simulator/device
+- `npm run web` - Run in web browser
+- `npm run lint` - Run ESLint
+- `npm test` - Run tests
+
+### Building for Production
+
+This project uses EAS Build for production builds. See [EAS documentation](https://docs.expo.dev/build/introduction/) for more information.
+
+## License
+
+Private project - All rights reserved
+
+## Contributing
+
+This is a private project. Contributions are not currently accepted.

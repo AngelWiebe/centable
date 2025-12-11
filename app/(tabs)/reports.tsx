@@ -1,6 +1,4 @@
 import DateTimePicker from "@react-native-community/datetimepicker";
-import * as FileSystem from "expo-file-system";
-import * as IntentLauncher from "expo-intent-launcher";
 import { printToFileAsync } from "expo-print";
 import React, { useEffect, useState } from "react";
 import {
@@ -14,6 +12,20 @@ import {
 } from "react-native";
 import { BarChart, PieChart } from "react-native-chart-kit";
 import { KeyboardAwareScrollView } from "react-native-keyboard-aware-scroll-view";
+
+let FileSystem: any = null;
+let IntentLauncher: any = null;
+
+try {
+  // @ts-ignore - Native modules may not be available in all environments
+  FileSystem = require("expo-file-system");
+  // @ts-ignore
+  IntentLauncher = require("expo-intent-launcher");
+} catch (e) {
+  // Native modules not available (e.g., in Expo Go)
+  FileSystem = null;
+  IntentLauncher = null;
+}
 
 import { Colors } from "../../constants/Colors";
 import { currencySettings } from "../../types/settings";
@@ -83,39 +95,35 @@ const Reports: React.FC = () => {
     (sum, val) => sum + val,
     0
   );
-  
-  const chartEntries = Object.entries(expenseBreakdown);
-  
+
+  // Group expenses: combine those below 5% into "Other"
+  const groupedExpenseBreakdown: Record<string, number> = {};
   let otherTotal = 0;
-  const filteredEntries = [];
-  
-  for (const [name, amount] of chartEntries) {
-    const percentage = amount / totalAmount;
+
+  for (const [name, amount] of Object.entries(expenseBreakdown)) {
+    const percentage = totalAmount > 0 ? amount / totalAmount : 0;
     if (percentage < 0.05) {
       otherTotal += amount;
     } else {
-      filteredEntries.push({
-        name,
-        amount,
-        color: generateRandomColor(),
-        legendFontColor: colorScheme.text,
-        legendFontSize: 14,
-      });
+      groupedExpenseBreakdown[name] = amount;
     }
   }
-  
+
   if (otherTotal > 0) {
-    filteredEntries.push({
-      name: "Other",
-      amount: otherTotal,
-      color: generateRandomColor(),
-      legendFontColor: colorScheme.text,
-      legendFontSize: 14,
-    });
+    groupedExpenseBreakdown["Other"] = otherTotal;
   }
-  
+
+  // Create chart data for pie chart
+  const chartEntries = Object.entries(groupedExpenseBreakdown);
+  const filteredEntries = chartEntries.map(([name, amount]) => ({
+    name,
+    amount,
+    color: generateRandomColor(),
+    legendFontColor: colorScheme.text,
+    legendFontSize: 14,
+  }));
+
   const expenseChartData = filteredEntries;
-  
 
   const totalRemainingBalance = filteredBudgets.reduce(
     (sum, budget) => sum + budget.remainingBalance,
@@ -124,6 +132,14 @@ const Reports: React.FC = () => {
 
   const downloadReportAsPDF = async () => {
     try {
+      if (!FileSystem || !FileSystem.documentDirectory) {
+        Alert.alert(
+          "Not Available",
+          "PDF export requires a development build. Please rebuild the app with 'npx expo run:android' or 'npx expo run:ios'."
+        );
+        return;
+      }
+
       const formattedStartDate = startDate
         ? startDate.toLocaleDateString()
         : "N/A";
@@ -162,7 +178,7 @@ const Reports: React.FC = () => {
             <div class="section">
               <h3>Expense Summary</h3>
               <p>Total Expenses: ${symbol}${totalExpenses.toFixed(decimals)}</p>
-              ${Object.entries(expenseBreakdown)
+              ${Object.entries(groupedExpenseBreakdown)
                 .map(
                   ([name, amount]) =>
                     `<div class="item-row"><span>${name}</span><span>${symbol}${amount.toFixed(
@@ -197,7 +213,7 @@ const Reports: React.FC = () => {
 
       Alert.alert("Success", `Report saved to:\n${newPath}`);
 
-      if (Platform.OS === "android") {
+      if (Platform.OS === "android" && IntentLauncher) {
         const contentUri = await FileSystem.getContentUriAsync(newPath);
         await IntentLauncher.startActivityAsync("android.intent.action.VIEW", {
           data: contentUri,
@@ -349,7 +365,7 @@ const Reports: React.FC = () => {
               <Text style={[styles.sectionTitle, { color: colorScheme.text }]}>
                 Full Expense Breakdown
               </Text>
-              {Object.entries(expenseBreakdown).map(([name, amount]) => (
+              {Object.entries(groupedExpenseBreakdown).map(([name, amount]) => (
                 <View
                   key={name}
                   style={[

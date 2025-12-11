@@ -45,7 +45,20 @@ const FinancialForm = <T extends { id: string; date: Date }>({
   const [rawAmount, setRawAmount] = useState<string>(
     formData.amount?.toString() || ""
   );
-  const [isOneTime, setIsOneTime] = useState<boolean>(false);
+  // Default to recurring (false) - only true if explicitly one-time
+  // For new entries, default to recurring. For edits, check if frequency exists
+  const [isOneTime, setIsOneTime] = useState<boolean>(() => {
+    // If editing and frequency is explicitly null/undefined, it's one-time
+    if (isEditing && (formData.frequency === null || formData.frequency === undefined)) {
+      return true;
+    }
+    // If frequency exists but has no unit, it's one-time
+    if (formData.frequency && !formData.frequency.unit) {
+      return true;
+    }
+    // Default to recurring (false)
+    return false;
+  });
   const [isKeyboardOpen, setIsKeyboardOpen] = useState(false);
   const { settings } = useBudgetStore();
   const theme = settings?.theme ?? "dark";
@@ -72,9 +85,17 @@ const FinancialForm = <T extends { id: string; date: Date }>({
   }, []);
 
   useEffect(() => {
-    if (formData.amount) {
-      setIsOneTime(!formData.frequency || !formData.frequency.unit);
+    // Initialize frequency to 1 month on first load if not set and not one-time
+    const hasFrequency = formData.frequency && formData.frequency.unit;
+    
+    // If no frequency is set and it's not one-time, default to 1 month
+    if (!hasFrequency && !isOneTime) {
+      setFormData({
+        ...formData,
+        frequency: { value: 1, unit: "months" },
+      });
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleAmountChange = (text: string) => {
@@ -102,7 +123,22 @@ const FinancialForm = <T extends { id: string; date: Date }>({
   };
 
   const validateAndSubmit = () => {
-    if (isOneTime || (formData.frequency && formData.frequency.unit)) {
+    // Default to 1 month if frequency is not set and not one-time
+    const finalFrequency = isOneTime
+      ? undefined
+      : formData.frequency || { value: 1, unit: "months" };
+
+    if (isOneTime || (finalFrequency && finalFrequency.unit)) {
+      // Ensure frequency is set before submitting if not one-time
+      if (!isOneTime && finalFrequency) {
+        setFormData({
+          ...formData,
+          frequency: {
+            value: finalFrequency.value || 1,
+            unit: finalFrequency.unit || "months",
+          },
+        });
+      }
       AccessibilityInfo.announceForAccessibility(
         isEditing ? "Updating financial entry" : "Adding financial entry"
       );
@@ -124,6 +160,7 @@ const FinancialForm = <T extends { id: string; date: Date }>({
         styles.container,
         isKeyboardOpen && Platform.OS === "android" ? styles.keyboardOpen : {},
       ]}
+      pointerEvents="box-none"
     >
       <KeyboardAwareScrollView
         contentContainerStyle={[
@@ -134,6 +171,8 @@ const FinancialForm = <T extends { id: string; date: Date }>({
         enableOnAndroid={true}
         extraScrollHeight={0}
         enableResetScrollToCoords={true}
+        showsVerticalScrollIndicator={true}
+        nestedScrollEnabled={true}
       >
         <Text style={[styles.label, { color: colorScheme.text }]}>Name</Text>
         <TextInput
@@ -204,10 +243,19 @@ const FinancialForm = <T extends { id: string; date: Date }>({
             value={isOneTime}
             onValueChange={(value) => {
               setIsOneTime(value);
-              setFormData({
-                ...formData,
-                frequency: value ? undefined : { value: 1, unit: "months" },
-              });
+              if (!value) {
+                // When switching to recurring, ensure frequency is set to 1 month
+                setFormData({
+                  ...formData,
+                  frequency: { value: 1, unit: "months" },
+                });
+              } else {
+                // When switching to one-time, remove frequency
+                setFormData({
+                  ...formData,
+                  frequency: undefined,
+                });
+              }
             }}
           />
         </View>
@@ -220,7 +268,7 @@ const FinancialForm = <T extends { id: string; date: Date }>({
             <View style={styles.frequencyContainer}>
               <TextInput
                 placeholder="1"
-                value={formData.frequency?.value?.toString() || ""}
+                value={formData.frequency?.value?.toString() || "1"}
                 onChangeText={handleFrequencyChange}
                 style={[
                   styles.frequencyInput,

@@ -187,18 +187,43 @@ const useBudgetStore = create<BudgetState>((set, get) => ({
 
   generateAndSaveBudgets: async () => {
     const { incomes, expenses, setBudgets, getPaidStatusFromStorage } = get();
-    console.log("GENERATE");
+
+    // Calculate date range: beginning of last month to end of next 3 months
+    const startDate = new Date();
+    startDate.setDate(1);
+    startDate.setMonth(startDate.getMonth() - 1);
+    startDate.setHours(0, 0, 0, 0);
 
     const endDate = new Date();
-    endDate.setMonth(endDate.getMonth() + 3);
+    endDate.setMonth(endDate.getMonth() + 4); // Go to month after target
+    endDate.setDate(0); // Last day of previous month (which is the target month)
+    endDate.setHours(23, 59, 59, 999);
 
-    const allIncomes = generateOccurrences(incomes, endDate).sort(
-      (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
-    );
+    // Generate occurrences and filter by date range
+    const allIncomesRaw = generateOccurrences(incomes, endDate);
+    const allExpensesRaw = generateOccurrences(expenses, endDate);
 
-    const allExpenses = generateOccurrences(expenses, endDate).sort(
-      (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
-    );
+    const allIncomes = allIncomesRaw
+      .filter((income) => {
+        const incomeDate = new Date(income.date);
+        return incomeDate >= startDate && incomeDate <= endDate;
+      })
+      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+    // Sort expenses by highest amount first, then by date
+    const allExpenses = allExpensesRaw
+      .filter((expense) => {
+        const expenseDate = new Date(expense.date);
+        return expenseDate >= startDate && expenseDate <= endDate;
+      })
+      .sort((a, b) => {
+        // First sort by amount (descending - highest first)
+        if (b.amount !== a.amount) {
+          return b.amount - a.amount;
+        }
+        // Then by date (ascending)
+        return new Date(a.date).getTime() - new Date(b.date).getTime();
+      });
 
     const paidStatusCache = await getPaidStatusCache(
       allIncomes,
@@ -209,7 +234,9 @@ const useBudgetStore = create<BudgetState>((set, get) => ({
     await clearAllBudgets();
 
     const failedExpenses: ExpenseInterface[] = [];
-    const budgets: StoredBudget[] = allIncomes.map(createBudget);
+    const budgets: StoredBudget[] = allIncomes
+      .map(createBudget)
+      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
     // Build existing overrides by expense id per income occurrence (if any in current store)
     const existingByIncomeId: Record<
@@ -227,45 +254,67 @@ const useBudgetStore = create<BudgetState>((set, get) => ({
       });
     });
 
+    // Assign each expense to the nearest income that occurs BEFORE it
     for (const expense of allExpenses) {
       const expenseDate = new Date(expense.date);
+      expenseDate.setHours(0, 0, 0, 0); // Normalize to start of day
       let assigned = false;
 
-      for (const budget of budgets) {
+      // Find the nearest income that occurs before this expense
+      // Start from the end and work backwards to find the most recent prior income
+      for (let i = budgets.length - 1; i >= 0; i--) {
+        const budget = budgets[i];
         const incomeDate = new Date(budget.date);
-        if (
-          incomeDate >= expenseDate &&
-          budget.remainingBalance >= expense.amount
-        ) {
-          const overrideKey = `${budget.income.id}-${budget.date}`;
-          const override = existingByIncomeId[overrideKey]?.[expense.id];
-          const paid =
-            override?.paid ??
-            paidStatusCache[`${budget.income.id}-${expense.id}`] ??
-            false;
-          const billAmount = override?.amount ?? expense.amount;
-          budget.bills.push({
-            id: uuid.v4().toString(),
-            amount: billAmount,
-            expense: {
-              ...expense,
-              date: expenseDate,
-            },
-            paid,
-            sort_order: budget.bills.length,
-          });
+        incomeDate.setHours(0, 0, 0, 0); // Normalize to start of day
+        const overrideKey = `${budget.income.id}-${budget.date}`;
+        const override = existingByIncomeId[overrideKey]?.[expense.id];
+        const billAmount = override?.amount ?? expense.amount;
 
-          budget.remainingBalance -= billAmount;
-          assigned = true;
-          break;
+        // Income must occur STRICTLY before the expense (not on the same day)
+        if (incomeDate.getTime() < expenseDate.getTime()) {
+          // Check if this budget has remaining funds
+          if (budget.remainingBalance >= billAmount) {
+            const paid =
+              override?.paid ??
+              paidStatusCache[`${budget.income.id}-${expense.id}`] ??
+              false;
+
+            budget.bills.push({
+              id: uuid.v4().toString(),
+              amount: billAmount,
+              expense: {
+                ...expense,
+                date: expenseDate,
+              },
+              paid,
+              sort_order: budget.bills.length,
+            });
+
+            budget.remainingBalance -= billAmount;
+            assigned = true;
+            break; // Found the nearest prior income with funds
+          }
+          // If this income has no remaining funds, continue to previous income (fallback)
         }
       }
 
-      if (!assigned) failedExpenses.push(expense);
+      if (!assigned) {
+        failedExpenses.push(expense);
+        console.warn(
+          `Expense "${expense.name}" (${expenseDate.toISOString()}) could not be assigned to any budget`
+        );
+      }
     }
 
     try {
-      await Promise.all(budgets.map((b) => addOrUpdateBudget(b)));
+      // Insert budgets sequentially to avoid SQLite statement conflicts
+      for (const budget of budgets) {
+        try {
+          await addOrUpdateBudget(budget);
+        } catch (error) {
+          console.error("Error saving budget:", error);
+        }
+      }
     } catch (e) {
       console.error(e);
     }
@@ -274,7 +323,6 @@ const useBudgetStore = create<BudgetState>((set, get) => ({
 
   refreshBudgets: async () => {
     try {
-      console.log("REFRESH");
       const {
         incomes,
         expenses,
@@ -284,11 +332,42 @@ const useBudgetStore = create<BudgetState>((set, get) => ({
       } = get();
       const assignedExpenses = new Set<string>();
 
-      const endDate = new Date();
-      endDate.setMonth(endDate.getMonth() + 3);
+      // Calculate date range: beginning of last month to end of next 3 months
+      const startDate = new Date();
+      startDate.setDate(1);
+      startDate.setMonth(startDate.getMonth() - 1);
+      startDate.setHours(0, 0, 0, 0);
 
-      const allIncomes = generateOccurrences(incomes, endDate);
-      const allExpenses = generateOccurrences(expenses, endDate);
+      const endDate = new Date();
+      endDate.setMonth(endDate.getMonth() + 4); // Go to month after target
+      endDate.setDate(0); // Last day of previous month (which is the target month)
+      endDate.setHours(23, 59, 59, 999);
+
+      // Generate occurrences and filter by date range
+      const allIncomesRaw = generateOccurrences(incomes, endDate);
+      const allExpensesRaw = generateOccurrences(expenses, endDate);
+
+      const allIncomes = allIncomesRaw
+        .filter((income) => {
+          const incomeDate = new Date(income.date);
+          return incomeDate >= startDate && incomeDate <= endDate;
+        })
+        .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+      // Sort expenses by highest amount first, then by date
+      const allExpenses = allExpensesRaw
+        .filter((expense) => {
+          const expenseDate = new Date(expense.date);
+          return expenseDate >= startDate && expenseDate <= endDate;
+        })
+        .sort((a, b) => {
+          // First sort by amount (descending - highest first)
+          if (b.amount !== a.amount) {
+            return b.amount - a.amount;
+          }
+          // Then by date (ascending)
+          return new Date(a.date).getTime() - new Date(b.date).getTime();
+        });
 
       const paidStatusCache = await getPaidStatusCache(
         allIncomes,
@@ -317,44 +396,106 @@ const useBudgetStore = create<BudgetState>((set, get) => ({
       const failedExpenses: ExpenseInterface[] = [];
       const updatedBudgets: StoredBudget[] = [];
 
+      // First, ensure all budgets exist and are properly initialized
       for (let i = 0; i < allIncomes.length; i++) {
         const income = allIncomes[i];
-        const nextIncomeDate = allIncomes[i + 1]?.date || null;
         const budgetKey = `${income.id}-${income.date}`;
         let budget = budgetMap.get(budgetKey);
 
-        if (!budget || budget.remainingBalance < 0) {
-          budget = budget ? { ...budget } : createBudget(income);
-          budget.amount = income.amount;
-          budget.remainingBalance = income.amount;
-          budget.bills = [];
-
-          assignExpensesToBudget(
-            budget,
-            allExpenses,
-            paidStatusCache,
-            failedExpenses,
-            nextIncomeDate,
-            assignedExpenses
-          );
-          // Apply overrides for amounts/paid where possible
-          const overrideKey = `${income.id}-${income.date.toISOString()}`;
-          budget.bills = budget.bills.map((bill) => {
-            const override = existingByIncomeId[overrideKey]?.[bill.expense.id];
-            const amount = override?.amount ?? bill.amount;
-            const paid = override?.paid ?? bill.paid;
-            return { ...bill, amount, paid };
-          });
-          budget.remainingBalance =
-            budget.amount - budget.bills.reduce((s, b) => s + b.amount, 0);
-          updatedBudgets.push(budget);
+        if (!budget) {
+          // Create new budget if it doesn't exist
+          budget = createBudget(income);
+          budgetMap.set(budgetKey, budget);
         }
       }
 
+      // Create budgets for all incomes
+      const allBudgets: StoredBudget[] = allIncomes
+        .map((income) => {
+          const budgetKey = `${income.id}-${income.date}`;
+          const existingBudget = budgetMap.get(budgetKey);
+          if (existingBudget && existingBudget.remainingBalance >= 0) {
+            // Preserve existing budget but reset bills for reassignment
+            return {
+              ...existingBudget,
+              amount: income.amount,
+              remainingBalance: income.amount,
+              bills: [],
+            };
+          }
+          return createBudget(income);
+        })
+        .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+      // Assign each expense to the nearest income that occurs BEFORE it
+      // Expenses are already sorted by highest amount first
+      for (const expense of allExpenses) {
+        const expenseDate = new Date(expense.date);
+        expenseDate.setHours(0, 0, 0, 0); // Normalize to start of day
+        let assigned = false;
+
+        // Find the nearest income that occurs before this expense
+        // Start from the end and work backwards to find the most recent prior income
+        for (let i = allBudgets.length - 1; i >= 0; i--) {
+          const budget = allBudgets[i];
+          const incomeDate = new Date(budget.date);
+          incomeDate.setHours(0, 0, 0, 0); // Normalize to start of day
+          const overrideKey = `${budget.income.id}-${budget.date}`;
+          const override = existingByIncomeId[overrideKey]?.[expense.id];
+          const billAmount = override?.amount ?? expense.amount;
+
+          // Income must occur STRICTLY before the expense (not on the same day)
+          if (incomeDate.getTime() < expenseDate.getTime()) {
+            // Check if this budget has remaining funds
+            if (budget.remainingBalance >= billAmount) {
+              const paid =
+                override?.paid ??
+                paidStatusCache[`${budget.income.id}-${expense.id}`] ??
+                false;
+
+              budget.bills.push({
+                id: uuid.v4().toString(),
+                amount: billAmount,
+                expense: {
+                  ...expense,
+                  date: expenseDate,
+                },
+                paid,
+                sort_order: budget.bills.length,
+              });
+
+              budget.remainingBalance -= billAmount;
+              assigned = true;
+              break; // Found the nearest prior income with funds
+            }
+            // If this income has no remaining funds, continue to previous income (fallback)
+          }
+        }
+
+        if (!assigned) {
+          failedExpenses.push(expense);
+          console.warn(
+            `Expense "${expense.name}" (${expenseDate.toISOString()}) could not be assigned to any budget`
+          );
+        }
+      }
+
+      // Recalculate remaining balance for all budgets
+      for (const budget of allBudgets) {
+        budget.remainingBalance =
+          budget.amount - budget.bills.reduce((s, b) => s + b.amount, 0);
+        updatedBudgets.push(budget);
+      }
+
       if (updatedBudgets.length > 0) {
-        await Promise.all(
-          updatedBudgets.map((budget) => addOrUpdateBudget(budget))
-        );
+        // Insert budgets sequentially to avoid SQLite statement conflicts
+        for (const budget of updatedBudgets) {
+          try {
+            await addOrUpdateBudget(budget);
+          } catch (error) {
+            console.error("Error saving budget:", error);
+          }
+        }
         setBudgets(updatedBudgets);
       }
     } catch (e) {
@@ -370,7 +511,6 @@ const useBudgetStore = create<BudgetState>((set, get) => ({
       const budgets = await getBudgets();
       const settings = await getSettings();
 
-      console.log("CLEAN", budgets.length);
       set({ incomes, expenses, budgets, settings });
     } catch (error) {
       console.error("❌ Error loading budgets:", error);
@@ -401,6 +541,7 @@ const useBudgetStore = create<BudgetState>((set, get) => ({
     set({
       incomes: [...get().incomes.filter((i) => i.id !== income.id), income],
     });
+    await get().refreshBudgets();
   },
 
   addOrUpdateExpense: async (expenseForm) => {
@@ -417,16 +558,19 @@ const useBudgetStore = create<BudgetState>((set, get) => ({
     set({
       expenses: [...get().expenses.filter((e) => e.id !== expense.id), expense],
     });
+    await get().refreshBudgets();
   },
 
   deleteIncome: async (id) => {
     await deleteIncome(id);
     set({ incomes: get().incomes.filter((income) => income.id !== id) });
+    await get().refreshBudgets();
   },
 
   deleteExpense: async (id) => {
     await deleteExpense(id);
     set({ expenses: get().expenses.filter((expense) => expense.id !== id) });
+    await get().refreshBudgets();
   },
 
   deleteBudget: async (id) => {
