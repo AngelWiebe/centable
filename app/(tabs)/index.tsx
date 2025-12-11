@@ -1,39 +1,86 @@
-import { StyleSheet } from "react-native";
+import { useEffect } from "react";
+import { ScrollView, StyleSheet } from "react-native";
 
-import { ThemedView } from "../../components/ThemedView";
 import { ThemedText } from "../../components/ThemedText";
+import { ThemedView } from "../../components/ThemedView";
+import { Colors } from "../../constants/Colors";
+import useBudgetStore from "../store/useBudgetStore";
 
 export default function TabOneScreen() {
+  const { fetchAndCleanBudgets, settings } = useBudgetStore();
+  const colorScheme = settings?.theme === "dark" ? Colors.dark : Colors.light;
+
+  useEffect(() => {
+    fetchAndCleanBudgets().catch((error) =>
+      console.error("❌ Failed to load budgets:", error)
+    );
+  }, []);
+
   return (
-    <ThemedView style={styles.container}>
-      <ThemedText style={styles.title}>Disclaimers</ThemedText>
-      <ThemedText
-        style={styles.disclaimerText}
-        accessibilityLabel="Data storage disclaimer"
+    <ScrollView style={{ backgroundColor: colorScheme.background }}>
+      <ThemedView
+        style={[
+          styles.container,
+          { backgroundColor: colorScheme.cardBackground },
+        ]}
       >
-        - All data entered is stored locally on your device. Clearing the cache
-        or cookies will result in the need to re-enter all data.
-      </ThemedText>
-      <ThemedText
-        style={styles.disclaimerText}
-        accessibilityLabel="Budgeting tip"
-      >
-        - For best results, estimate expenses high and incomes low.
-      </ThemedText>
-      <ThemedText style={styles.disclaimerText} accessibilityLabel="Saving tip">
-        - Recommendation: add an "expense" for weekly spending. The leftover
-        funds become your savings. Alternatively, add an "expense" for the
-        amount you want to save, and the remaining funds are for spending.
-      </ThemedText>
-      <ThemedText
-        style={styles.disclaimerText}
-        accessibilityLabel="Expense management advice"
-      >
-        - It is advisable to keep expense-related funds in a separate account
-        from spending money to prevent overspending.
-      </ThemedText>
-      <ThemedView style={styles.separator} />
-    </ThemedView>
+        <ThemedText
+          style={[styles.disclaimerText, { color: colorScheme.text }]}
+          accessibilityLabel="Budgeting strategy"
+        >
+          - To build a sustainable budget, **overestimate expenses and
+          underestimate income** to create a buffer for unexpected costs.
+        </ThemedText>
+
+        <ThemedText
+          style={[styles.disclaimerText, { color: colorScheme.text }]}
+          accessibilityLabel="Savings recommendation"
+        >
+          - **Pay yourself first**: Treat savings as a fixed expense. Set aside
+          a percentage of your income (e.g., 20%) before spending.
+        </ThemedText>
+
+        <ThemedText
+          style={[styles.disclaimerText, { color: colorScheme.text }]}
+          accessibilityLabel="Spending management"
+        >
+          - Consider adding an "expense" for **weekly discretionary spending**.
+          Any leftover funds can be allocated toward **savings or investments**.
+        </ThemedText>
+
+        <ThemedText
+          style={[styles.disclaimerText, { color: colorScheme.text }]}
+          accessibilityLabel="Expense tracking tip"
+        >
+          - Separate your **fixed expenses (e.g., rent, insurance) from variable
+          expenses** (e.g., dining, shopping) to identify areas to cut costs.
+        </ThemedText>
+
+        <ThemedText
+          style={[styles.disclaimerText, { color: colorScheme.text }]}
+          accessibilityLabel="Financial discipline advice"
+        >
+          - **Use separate accounts**: Keep savings and emergency funds in
+          separate accounts from daily spending to **prevent overspending**.
+        </ThemedText>
+
+        <ThemedText
+          style={[styles.disclaimerText, { color: colorScheme.text }]}
+          accessibilityLabel="Debt management tip"
+        >
+          - If you have **debt**, prioritize paying high-interest loans first.
+          Consider the **debt snowball (smallest to largest) or avalanche
+          (highest interest first) method**.
+        </ThemedText>
+
+        <ThemedView
+          style={[
+            styles.separator,
+            { backgroundColor: colorScheme.borderBottomColor },
+          ]}
+        />
+      </ThemedView>
+    </ScrollView>
   );
 }
 
@@ -43,6 +90,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 20,
+    paddingTop: 20,
   },
   title: {
     fontSize: 24,
@@ -58,10 +106,8 @@ const styles = StyleSheet.create({
     marginVertical: 30,
     height: 1,
     width: "80%",
-    backgroundColor: "#ccc",
   },
   button: {
-    backgroundColor: "#1E90FF",
     paddingVertical: 12,
     paddingHorizontal: 24,
     borderRadius: 8,
@@ -69,6 +115,5 @@ const styles = StyleSheet.create({
   buttonText: {
     fontSize: 16,
     fontWeight: "bold",
-    color: "#FFFFFF",
   },
 });

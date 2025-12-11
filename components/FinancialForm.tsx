@@ -1,22 +1,24 @@
-import React, { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import {
-  View,
+  AccessibilityInfo,
+  Alert,
+  Keyboard,
+  Platform,
+  StyleSheet,
+  Switch,
   Text,
   TextInput,
   TouchableOpacity,
-  StyleSheet,
-  Platform,
-  Switch,
-  Alert,
-  Keyboard,
-  AccessibilityInfo,
+  View,
 } from "react-native";
 
-import { Picker } from "@react-native-picker/picker";
 import DateTimePicker from "@react-native-community/datetimepicker";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { Picker } from "@react-native-picker/picker";
 import { KeyboardAwareScrollView } from "react-native-keyboard-aware-scroll-view";
+import { SafeAreaView } from "react-native-safe-area-context";
 
+import useBudgetStore from "../app/store/useBudgetStore";
+import { Colors } from "../constants/Colors";
 import { FrequencyInterface } from "../types/frequency";
 
 interface FinancialFormProps<T> {
@@ -45,6 +47,9 @@ const FinancialForm = <T extends { id: string; date: Date }>({
   );
   const [isOneTime, setIsOneTime] = useState<boolean>(false);
   const [isKeyboardOpen, setIsKeyboardOpen] = useState(false);
+  const { settings } = useBudgetStore();
+  const theme = settings?.theme ?? "dark";
+  const colorScheme = Colors[theme];
 
   useEffect(() => {
     const keyboardDidShowListener = Keyboard.addListener(
@@ -121,26 +126,48 @@ const FinancialForm = <T extends { id: string; date: Date }>({
       ]}
     >
       <KeyboardAwareScrollView
-        contentContainerStyle={styles.formContainer}
+        contentContainerStyle={[
+          styles.formContainer,
+          { backgroundColor: colorScheme.background },
+        ]}
         keyboardShouldPersistTaps="handled"
         enableOnAndroid={true}
         extraScrollHeight={0}
         enableResetScrollToCoords={true}
       >
-        <Text style={styles.label}>Name</Text>
+        <Text style={[styles.label, { color: colorScheme.text }]}>Name</Text>
         <TextInput
           placeholder="Enter name"
           value={formData.name || ""}
           onChangeText={(text) => setFormData({ ...formData, name: text })}
-          style={styles.input}
-          placeholderTextColor="#AAAAAA"
+          style={[
+            styles.input,
+            {
+              backgroundColor: colorScheme.cardBackground,
+              color: colorScheme.text,
+              borderColor: colorScheme.borderBottomColor,
+            },
+          ]}
+          placeholderTextColor={colorScheme.text}
         />
-        <Text style={styles.label}>Date</Text>
+        <Text style={[styles.label, { color: colorScheme.text }]}>Date</Text>
         <TouchableOpacity
           onPress={() => setShowDatePicker(true)}
-          style={styles.dateButton}
+          style={[
+            styles.input,
+            {
+              backgroundColor: colorScheme.cardBackground,
+              borderColor: colorScheme.borderBottomColor,
+            },
+          ]}
         >
-          <Text style={styles.dateButtonText}>
+          <Text
+            style={[
+              {
+                color: colorScheme.text,
+              },
+            ]}
+          >
             {formData.date ? formData.date.toDateString() : "Select Date"}
           </Text>
         </TouchableOpacity>
@@ -151,19 +178,28 @@ const FinancialForm = <T extends { id: string; date: Date }>({
           />
         )}
 
-        <Text style={styles.label}>Amount</Text>
+        <Text style={[styles.label, { color: colorScheme.text }]}>Amount</Text>
         <TextInput
           placeholder="Enter amount"
           value={rawAmount}
           onChangeText={handleAmountChange}
           onBlur={handleAmountBlur}
-          style={styles.input}
+          style={[
+            styles.input,
+            {
+              backgroundColor: colorScheme.cardBackground,
+              color: colorScheme.text,
+              borderColor: colorScheme.borderBottomColor,
+            },
+          ]}
           keyboardType="decimal-pad"
-          placeholderTextColor="#AAAAAA"
+          placeholderTextColor={colorScheme.tint}
         />
 
         <View style={styles.oneTimeContainer}>
-          <Text style={styles.label}>One-Time Occurrence</Text>
+          <Text style={[styles.label, { color: colorScheme.text }]}>
+            One-Time Occurrence
+          </Text>
           <Switch
             value={isOneTime}
             onValueChange={(value) => {
@@ -178,17 +214,34 @@ const FinancialForm = <T extends { id: string; date: Date }>({
 
         {!isOneTime && (
           <>
-            <Text style={styles.label}>Frequency</Text>
+            <Text style={[styles.label, { color: colorScheme.text }]}>
+              Frequency
+            </Text>
             <View style={styles.frequencyContainer}>
               <TextInput
                 placeholder="1"
                 value={formData.frequency?.value?.toString() || ""}
                 onChangeText={handleFrequencyChange}
-                style={styles.frequencyInput}
+                style={[
+                  styles.frequencyInput,
+                  {
+                    backgroundColor: colorScheme.cardBackground,
+                    color: colorScheme.text,
+                    borderColor: colorScheme.borderBottomColor,
+                  },
+                ]}
                 keyboardType="numeric"
-                placeholderTextColor="#AAAAAA"
+                placeholderTextColor={colorScheme.tint}
               />
-              <View style={styles.pickerWrapper}>
+              <View
+                style={[
+                  styles.pickerWrapper,
+                  {
+                    backgroundColor: colorScheme.cardBackground,
+                    borderColor: colorScheme.borderBottomColor,
+                  },
+                ]}
+              >
                 <Picker
                   selectedValue={formData.frequency?.unit || "months"}
                   onValueChange={(itemValue) =>
@@ -200,7 +253,7 @@ const FinancialForm = <T extends { id: string; date: Date }>({
                       },
                     })
                   }
-                  style={styles.picker}
+                  style={[styles.picker, { color: colorScheme.text }]}
                 >
                   <Picker.Item label="Days" value="days" />
                   <Picker.Item label="Weeks" value="weeks" />
@@ -214,12 +267,25 @@ const FinancialForm = <T extends { id: string; date: Date }>({
 
         <TouchableOpacity
           onPress={validateAndSubmit}
-          style={styles.submitButton}
+          style={[
+            styles.submitButton,
+            { backgroundColor: colorScheme.submitButton },
+          ]}
         >
-          <Text style={styles.buttonText}>{isEditing ? "Update" : "Add"}</Text>
+          <Text style={[styles.buttonText, { color: colorScheme.buttonText }]}>
+            {isEditing ? "Update" : "Add"}
+          </Text>
         </TouchableOpacity>
-        <TouchableOpacity onPress={resetForm} style={styles.resetButton}>
-          <Text style={styles.buttonText}>Cancel</Text>
+        <TouchableOpacity
+          onPress={resetForm}
+          style={[
+            styles.resetButton,
+            { backgroundColor: colorScheme.resetButton },
+          ]}
+        >
+          <Text style={[styles.buttonText, { color: colorScheme.buttonText }]}>
+            Cancel
+          </Text>
         </TouchableOpacity>
       </KeyboardAwareScrollView>
     </SafeAreaView>
@@ -229,20 +295,16 @@ const FinancialForm = <T extends { id: string; date: Date }>({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#000",
   },
   formContainer: {
     padding: 20,
-    backgroundColor: "#222",
     borderRadius: 10,
     margin: 10,
-    shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.3,
     shadowRadius: 4,
     elevation: 5,
     justifyContent: "flex-start",
-    paddingBottom: 20,
   },
   keyboardOpen: {
     paddingBottom: -10,
@@ -250,19 +312,13 @@ const styles = StyleSheet.create({
   },
   label: {
     marginBottom: 5,
-    color: "#FFFFFF",
     fontWeight: "bold",
   },
   dateButton: {
     borderWidth: 1,
-    borderColor: "#444",
     borderRadius: 8,
     padding: 10,
-    backgroundColor: "#333",
     marginBottom: 15,
-  },
-  dateButtonText: {
-    color: "#CCCCCC",
   },
   frequencyContainer: {
     flexDirection: "row",
@@ -276,53 +332,42 @@ const styles = StyleSheet.create({
     marginBottom: 15,
   },
   submitButton: {
-    backgroundColor: "#007BFF",
     padding: 12,
     borderRadius: 8,
     alignItems: "center",
     marginBottom: 10,
   },
   resetButton: {
-    backgroundColor: "#FF5555",
     padding: 12,
     borderRadius: 8,
     alignItems: "center",
+    marginBottom: 25,
   },
   buttonText: {
-    color: "#FFFFFF",
     fontWeight: "bold",
   },
   input: {
     borderWidth: 1,
-    borderColor: "#444",
     borderRadius: 8,
     padding: 10,
     marginBottom: 15,
-    color: "#FFFFFF",
-    backgroundColor: "#333",
   },
   frequencyInput: {
     borderWidth: 1,
-    borderColor: "#444",
     borderRadius: 8,
     padding: 10,
     flex: 0.3,
     marginRight: 10,
-    color: "#FFFFFF",
-    backgroundColor: "#333",
   },
   pickerWrapper: {
     borderWidth: 1,
-    borderColor: "#444",
     borderRadius: 8,
-    backgroundColor: "#333",
     overflow: "hidden",
     flex: 0.7,
     height: 42,
     justifyContent: "center",
   },
   picker: {
-    color: "#FFFFFF",
     ...Platform.select({
       android: {
         paddingVertical: 0,
