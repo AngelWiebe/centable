@@ -1,32 +1,39 @@
-import React, { useState, useEffect, useRef } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  Dimensions,
-  ScrollView,
-  Alert,
-} from "react-native";
 import DateTimePicker from "@react-native-community/datetimepicker";
-import { BarChart, PieChart } from "react-native-chart-kit";
-import ViewShot from "react-native-view-shot";
-import { captureRef } from "react-native-view-shot";
+import * as FileSystem from "expo-file-system";
+import * as IntentLauncher from "expo-intent-launcher";
 import { printToFileAsync } from "expo-print";
-import { shareAsync } from "expo-sharing";
+import React, { useEffect, useState } from "react";
+import {
+  Alert,
+  Dimensions,
+  Platform,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import { BarChart, PieChart } from "react-native-chart-kit";
+import { KeyboardAwareScrollView } from "react-native-keyboard-aware-scroll-view";
 
+import { Colors } from "../../constants/Colors";
+import { currencySettings } from "../../types/settings";
+import { generateRandomColor } from "../../utils/generateRandomColor";
+import { getFirstAndLastDayOfMonth } from "../../utils/getFirstAndLast";
 import useBudgetStore from "../store/useBudgetStore";
 
 const screenWidth = Dimensions.get("window").width;
 
 const Reports: React.FC = () => {
-  const { budgets } = useBudgetStore();
-  const [startDate, setStartDate] = useState<Date | null>(null);
-  const [endDate, setEndDate] = useState<Date | null>(null);
+  const { budgets, settings } = useBudgetStore();
+  const { symbol, decimals } = currencySettings[settings?.currency || "CAD"];
+  const colorScheme = settings?.theme === "dark" ? Colors.dark : Colors.light;
+
+  const { firstDay, lastDay } = getFirstAndLastDayOfMonth();
+  const [startDate, setStartDate] = useState<Date | null>(firstDay);
+  const [endDate, setEndDate] = useState<Date | null>(lastDay);
   const [showStartPicker, setShowStartPicker] = useState(false);
   const [showEndPicker, setShowEndPicker] = useState(false);
   const [filtersApplied, setFiltersApplied] = useState(false);
-  const viewShotRef = useRef(null);
 
   const filteredBudgets = budgets.filter((budget) => {
     const budgetDate = new Date(budget.date);
@@ -72,61 +79,158 @@ const Reports: React.FC = () => {
     datasets: [{ data: Object.values(incomeBreakdown) }],
   };
 
-  const expenseChartData = Object.entries(expenseBreakdown).map(
-    ([name, amount]) => ({
-      name,
-      amount,
-      color: `#${Math.floor(Math.random() * 16777215).toString(16)}`,
-      legendFontColor: "#FFFFFF",
+  const totalAmount = Object.values(expenseBreakdown).reduce(
+    (sum, val) => sum + val,
+    0
+  );
+  
+  const chartEntries = Object.entries(expenseBreakdown);
+  
+  let otherTotal = 0;
+  const filteredEntries = [];
+  
+  for (const [name, amount] of chartEntries) {
+    const percentage = amount / totalAmount;
+    if (percentage < 0.05) {
+      otherTotal += amount;
+    } else {
+      filteredEntries.push({
+        name,
+        amount,
+        color: generateRandomColor(),
+        legendFontColor: colorScheme.text,
+        legendFontSize: 14,
+      });
+    }
+  }
+  
+  if (otherTotal > 0) {
+    filteredEntries.push({
+      name: "Other",
+      amount: otherTotal,
+      color: generateRandomColor(),
+      legendFontColor: colorScheme.text,
       legendFontSize: 14,
-    })
+    });
+  }
+  
+  const expenseChartData = filteredEntries;
+  
+
+  const totalRemainingBalance = filteredBudgets.reduce(
+    (sum, budget) => sum + budget.remainingBalance,
+    0
   );
 
   const downloadReportAsPDF = async () => {
     try {
-      if (!viewShotRef.current) return;
+      const formattedStartDate = startDate
+        ? startDate.toLocaleDateString()
+        : "N/A";
+      const formattedEndDate = endDate ? endDate.toLocaleDateString() : "N/A";
 
-      const uri = await captureRef(viewShotRef, {
-        format: "png",
-        quality: 0.8,
-      });
-
-      const htmlContent = `
+      const html = `
         <html>
-        <head>
-          <title>Budget Report</title>
-        </head>
-        <body style="font-family: Arial, sans-serif;">
-          <h2 style="text-align:center;">Budget Report</h2>
-          <p><strong>Total Income:</strong> $${totalIncome.toFixed(2)}</p>
-          <p><strong>Total Expenses:</strong> $${totalExpenses.toFixed(2)}</p>
-          <img src="${uri}" style="width:100%;" />
-        </body>
+          <head>
+            <style>
+              body { font-family: Arial; padding: 24px; color: #333; }
+              h2, h3 { color: #222; }
+              .section { margin-bottom: 24px; }
+              .item-row { display: flex; justify-content: space-between; padding: 4px 0; }
+              .label { font-weight: bold; }
+              img { max-width: 100%; margin-top: 10px; }
+            </style>
+          </head>
+          <body>
+            <h2>Budget Report</h2>
+            <p><strong>Start:</strong> ${formattedStartDate}</p>
+            <p><strong>End:</strong> ${formattedEndDate}</p>
+  
+            <div class="section">
+              <h3>Income Summary</h3>
+              <p>Total Income: ${symbol}${totalIncome.toFixed(decimals)}</p>
+              ${Object.entries(incomeBreakdown)
+                .map(
+                  ([name, amount]) =>
+                    `<div class="item-row"><span>${name}</span><span>${symbol}${amount.toFixed(
+                      decimals
+                    )}</span></div>`
+                )
+                .join("")}
+            </div>
+  
+            <div class="section">
+              <h3>Expense Summary</h3>
+              <p>Total Expenses: ${symbol}${totalExpenses.toFixed(decimals)}</p>
+              ${Object.entries(expenseBreakdown)
+                .map(
+                  ([name, amount]) =>
+                    `<div class="item-row"><span>${name}</span><span>${symbol}${amount.toFixed(
+                      decimals
+                    )}</span></div>`
+                )
+                .join("")}
+            </div>
+  
+            <div class="section">
+              <h3>Remaining Balances</h3>
+              <p>Total: ${symbol}${totalRemainingBalance.toFixed(decimals)}</p>
+              ${filteredBudgets
+                .map(
+                  (b) =>
+                    `<div class="item-row"><span>${
+                      b.income.name
+                    }</span><span>${symbol}${b.remainingBalance.toFixed(
+                      decimals
+                    )}</span></div>`
+                )
+                .join("")}
+            </div>
+          </body>
         </html>
       `;
 
-      const file = await printToFileAsync({
-        html: htmlContent,
-        base64: false,
-      });
+      const file = await printToFileAsync({ html, base64: false });
+      const newPath = `${FileSystem.documentDirectory}Budget_Report.pdf`;
 
-      await shareAsync(file.uri);
-      Alert.alert("Success", "Report saved and ready to share!");
-    } catch (error) {
-      console.error("Error generating report:", error);
-      Alert.alert("Error", "Could not generate the report.");
+      await FileSystem.moveAsync({ from: file.uri, to: newPath });
+
+      Alert.alert("Success", `Report saved to:\n${newPath}`);
+
+      if (Platform.OS === "android") {
+        const contentUri = await FileSystem.getContentUriAsync(newPath);
+        await IntentLauncher.startActivityAsync("android.intent.action.VIEW", {
+          data: contentUri,
+          flags: 1,
+          type: "application/pdf",
+        });
+      }
+    } catch (e) {
+      console.error("PDF generation error", e);
+      Alert.alert("Error", "Failed to generate PDF.");
     }
   };
 
   return (
-    <ScrollView contentContainerStyle={styles.scrollContainer}>
+    <KeyboardAwareScrollView
+      contentContainerStyle={[
+        styles.scrollContainer,
+        { backgroundColor: colorScheme.cardBackground },
+      ]}
+      keyboardShouldPersistTaps="handled"
+      enableOnAndroid={true}
+      extraScrollHeight={20}
+    >
       <View style={styles.filterContainer}>
         <TouchableOpacity
           onPress={() => setShowStartPicker(true)}
-          style={styles.filterButton}
+          style={[
+            styles.filterButton,
+            { backgroundColor: colorScheme.pickerBackground },
+          ]}
         >
           <Text
-            style={styles.filterText}
+            style={[styles.filterText, { color: colorScheme.text }]}
             numberOfLines={1}
             ellipsizeMode="tail"
           >
@@ -135,10 +239,13 @@ const Reports: React.FC = () => {
         </TouchableOpacity>
         <TouchableOpacity
           onPress={() => setShowEndPicker(true)}
-          style={styles.filterButton}
+          style={[
+            styles.filterButton,
+            { backgroundColor: colorScheme.pickerBackground },
+          ]}
         >
           <Text
-            style={styles.filterText}
+            style={[styles.filterText, { color: colorScheme.text }]}
             numberOfLines={1}
             ellipsizeMode="tail"
           >
@@ -172,10 +279,15 @@ const Reports: React.FC = () => {
 
       {filtersApplied ? (
         filteredBudgets.length > 0 ? (
-          <ViewShot ref={viewShotRef} style={styles.summaryContainer}>
-            <Text style={styles.sectionTitle}>Income Summary</Text>
-            <Text style={styles.summaryText}>
-              Total Income: ${totalIncome.toFixed(2)}
+          <View style={styles.summaryContainer}>
+            <Text style={[styles.sectionTitle, { color: colorScheme.text }]}>
+              Income Summary
+            </Text>
+            <Text
+              style={[styles.summaryText, { color: colorScheme.summaryAmount }]}
+            >
+              Total Income: {symbol}
+              {totalIncome.toFixed(decimals)}
             </Text>
 
             <BarChart
@@ -183,22 +295,33 @@ const Reports: React.FC = () => {
               width={screenWidth - 32}
               height={220}
               chartConfig={{
-                backgroundGradientFrom: "#1E1E1E",
-                backgroundGradientTo: "#1E1E1E",
-                color: (opacity = 1) => `rgba(0, 255, 127, ${opacity})`,
-                labelColor: () => "#FFFFFF",
                 style: { borderRadius: 16 },
+                backgroundGradientFrom: colorScheme.background,
+                backgroundGradientTo: colorScheme.background,
+                color: (opacity = 1) => colorScheme.expenseAmount,
+                labelColor: () => colorScheme.text,
               }}
+              fromZero={true}
               style={{ marginVertical: 8, borderRadius: 16 }}
-              yAxisSuffix="$"
-              yAxisLabel="$"
+              yAxisLabel={symbol}
+              yAxisSuffix={symbol}
+              yAxisInterval={100}
             />
 
-            <Text style={[styles.sectionTitle, { marginTop: 20 }]}>
+            <Text
+              style={[
+                styles.sectionTitle,
+                { marginTop: 20, color: colorScheme.text },
+              ]}
+            >
               Expense Summary
             </Text>
-            <Text style={styles.summaryText}>
-              Total Expenses: ${totalExpenses.toFixed(2)}
+
+            <Text
+              style={[styles.summaryText, { color: colorScheme.summaryAmount }]}
+            >
+              Total Expenses: {symbol}
+              {totalExpenses.toFixed(decimals)}
             </Text>
 
             <PieChart
@@ -206,39 +329,126 @@ const Reports: React.FC = () => {
               width={screenWidth - 32}
               height={220}
               chartConfig={{
-                color: (opacity = 1) => `rgba(255, 165, 0, ${opacity})`,
-                labelColor: () => "#FFFFFF",
+                backgroundGradientFrom: "#ffffff",
+                backgroundGradientTo: "#ffffff",
+                color: () => colorScheme.expenseAmount,
+                labelColor: () => colorScheme.text,
               }}
               accessor="amount"
               backgroundColor="transparent"
               paddingLeft="15"
               style={{ marginVertical: 8 }}
             />
-          </ViewShot>
+
+            <View
+              style={[
+                styles.expenseBreakdownContainer,
+                { backgroundColor: colorScheme.cardBackground },
+              ]}
+            >
+              <Text style={[styles.sectionTitle, { color: colorScheme.text }]}>
+                Full Expense Breakdown
+              </Text>
+              {Object.entries(expenseBreakdown).map(([name, amount]) => (
+                <View
+                  key={name}
+                  style={[
+                    styles.expenseItem,
+                    { borderBottomColor: colorScheme.borderBottomColor },
+                  ]}
+                >
+                  <Text
+                    style={[styles.expenseName, { color: colorScheme.text }]}
+                  >
+                    {name}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.expenseAmount,
+                      { color: colorScheme.expenseAmount },
+                    ]}
+                  >
+                    {symbol}
+                    {amount.toFixed(decimals)}
+                  </Text>
+                </View>
+              ))}
+            </View>
+            <View
+              style={[
+                styles.remainingBalanceContainer,
+                { backgroundColor: colorScheme.cardBackground },
+              ]}
+            >
+              <Text style={[styles.sectionTitle, { color: colorScheme.text }]}>
+                Remaining Balances
+              </Text>
+              <Text
+                style={[
+                  styles.summaryText,
+                  { color: colorScheme.summaryAmount },
+                ]}
+              >
+                Total Remaining Balance: {symbol}
+                {totalRemainingBalance.toFixed(decimals)}
+              </Text>
+              {filteredBudgets.map((budget) => (
+                <View
+                  key={budget.id}
+                  style={[
+                    styles.remainingBalanceItem,
+                    { borderBottomColor: colorScheme.borderBottomColor },
+                  ]}
+                >
+                  <Text
+                    style={[styles.budgetName, { color: colorScheme.text }]}
+                  >
+                    {budget.income.name}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.budgetAmount,
+                      { color: colorScheme.summaryAmount },
+                    ]}
+                  >
+                    {symbol}
+                    {budget.remainingBalance.toFixed(decimals)}
+                  </Text>
+                </View>
+              ))}
+            </View>
+            <TouchableOpacity
+              style={[
+                styles.downloadButton,
+                { backgroundColor: colorScheme.submitButton },
+              ]}
+              onPress={downloadReportAsPDF}
+            >
+              <Text
+                style={[styles.downloadText, { color: colorScheme.buttonText }]}
+              >
+                Download Report as PDF
+              </Text>
+            </TouchableOpacity>
+          </View>
         ) : (
-          <Text style={styles.noDataText}>
+          <Text style={[styles.noDataText, { color: colorScheme.text }]}>
             No budgets available for the selected date range.
           </Text>
         )
       ) : (
-        <Text style={styles.noDataText}>
+        <Text style={[styles.noDataText, { color: colorScheme.text }]}>
           Select a date range and apply filters to see reports.
         </Text>
       )}
-      <TouchableOpacity
-        style={styles.downloadButton}
-        onPress={downloadReportAsPDF}
-      >
-        <Text style={styles.downloadText}>Download Report as PDF</Text>
-      </TouchableOpacity>
-    </ScrollView>
+    </KeyboardAwareScrollView>
   );
 };
 
 const styles = StyleSheet.create({
   scrollContainer: {
-    padding: 16,
-    backgroundColor: "#1E1E1E",
+    padding: 10,
+    flexGrow: 1,
   },
   filterContainer: {
     flexDirection: "row",
@@ -249,13 +459,11 @@ const styles = StyleSheet.create({
     flex: 1,
     marginHorizontal: 4,
     padding: 10,
-    backgroundColor: "#2E2E2E",
     borderRadius: 5,
     alignItems: "center",
   },
   filterText: {
     fontSize: 14,
-    color: "#FFFFFF",
     textAlign: "center",
   },
   summaryContainer: {
@@ -264,18 +472,15 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 20,
     fontWeight: "bold",
-    color: "#FFFFFF",
     marginBottom: 8,
   },
   summaryText: {
     fontSize: 16,
     fontWeight: "bold",
-    color: "#00FF7F",
     marginBottom: 8,
   },
   noDataText: {
     fontSize: 16,
-    color: "#FF6347",
     textAlign: "center",
     marginTop: 20,
   },
@@ -285,11 +490,48 @@ const styles = StyleSheet.create({
     backgroundColor: "#00FF7F",
     borderRadius: 5,
     alignItems: "center",
+    marginBottom: 10,
   },
   downloadText: {
     fontSize: 16,
     fontWeight: "bold",
-    color: "#000",
+  },
+  expenseBreakdownContainer: {
+    marginTop: 20,
+    padding: 10,
+    borderRadius: 8,
+  },
+  expenseItem: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingVertical: 5,
+    borderBottomWidth: 1,
+  },
+  expenseName: {
+    fontSize: 16,
+  },
+  expenseAmount: {
+    fontSize: 16,
+    fontWeight: "bold",
+  },
+  remainingBalanceContainer: {
+    marginTop: 20,
+    padding: 10,
+    backgroundColor: "#444",
+    borderRadius: 8,
+  },
+  remainingBalanceItem: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingVertical: 5,
+    borderBottomWidth: 1,
+  },
+  budgetName: {
+    fontSize: 16,
+  },
+  budgetAmount: {
+    fontSize: 16,
+    fontWeight: "bold",
   },
 });
 

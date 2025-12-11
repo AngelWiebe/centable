@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
-import { Colors } from "@/constants/Colors";
+import { Colors } from "../../constants/Colors";
 import useBudgetStore from "../store/useBudgetStore";
 
 const currencies = ["USD", "EUR", "GBP", "JPY", "CAD"] as const;
@@ -36,7 +36,10 @@ const Settings: React.FC = () => {
 
   return (
     <View
-      style={[styles.container, { backgroundColor: colorScheme.background }]}
+      style={[
+        styles.container,
+        { backgroundColor: colorScheme.cardBackground },
+      ]}
     >
       <Text style={[styles.label, { color: colorScheme.text }]}>
         Select Currency:

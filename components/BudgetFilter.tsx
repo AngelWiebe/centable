@@ -1,14 +1,16 @@
+import { MaterialIcons } from "@expo/vector-icons";
 import React, { useState } from "react";
 import {
-  View,
-  StyleSheet,
   AccessibilityInfo,
-  TouchableOpacity,
   ActivityIndicator,
+  StyleSheet,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import RNPickerSelect from "react-native-picker-select";
-import { MaterialIcons } from "@expo/vector-icons";
+
 import useBudgetStore from "../app/store/useBudgetStore";
+import { Colors } from "../constants/Colors";
 
 const BudgetFilter: React.FC<{}> = ({}) => {
   const {
@@ -16,10 +18,13 @@ const BudgetFilter: React.FC<{}> = ({}) => {
     selectedYear,
     setSelectedMonth,
     setSelectedYear,
-    recalculateBudgets,
+    settings,
+    refreshBudgets,
   } = useBudgetStore();
 
   const [loading, setLoading] = useState(false);
+  const theme = settings?.theme ?? "dark";
+  const colorScheme = Colors[theme];
 
   const currentDate = new Date();
   const currentMonth = currentDate.getMonth() + 1;
@@ -54,7 +59,7 @@ const BudgetFilter: React.FC<{}> = ({}) => {
   const handleRefresh = async () => {
     setLoading(true);
     try {
-      await recalculateBudgets();
+      await refreshBudgets();
       AccessibilityInfo.announceForAccessibility("Budgets recalculated.");
     } catch (error) {
       console.error("Recalculation error:", error);
@@ -73,21 +78,42 @@ const BudgetFilter: React.FC<{}> = ({}) => {
           placeholder={{
             label: "Select a month",
             value: null,
-            color: "#AAAAAA",
+            color: colorScheme.submitButton,
           }}
-          style={pickerSelectStyles}
+          style={{
+            inputIOS: {
+              color: colorScheme.text,
+              backgroundColor: colorScheme.pickerBackground,
+              padding: 10,
+              borderRadius: 5,
+              fontSize: 16,
+            },
+            inputAndroid: {
+              color: colorScheme.text,
+              backgroundColor: colorScheme.pickerBackground,
+              padding: 10,
+              borderRadius: 5,
+              fontSize: 16,
+            },
+            placeholder: {
+              color: colorScheme.tint,
+            },
+          }}
           useNativeAndroidPickerStyle={false}
         />
       </View>
       <TouchableOpacity
         onPress={handleRefresh}
-        style={styles.refreshButton}
+        style={[
+          styles.refreshButton,
+          { backgroundColor: colorScheme.submitButton },
+        ]}
         disabled={loading}
       >
         {loading ? (
-          <ActivityIndicator size="small" color="#FFFFFF" />
+          <ActivityIndicator size="small" color={colorScheme.text} />
         ) : (
-          <MaterialIcons name="refresh" size={24} color="#FFFFFF" />
+          <MaterialIcons name="refresh" size={24} color={colorScheme.text} />
         )}
       </TouchableOpacity>
     </View>
@@ -100,39 +126,17 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     marginBottom: 10,
-    paddingHorizontal: 10,
   },
   pickerContainer: {
     flex: 1,
     marginRight: 10,
   },
   refreshButton: {
-    backgroundColor: "#4CAF50",
     padding: 10,
     borderRadius: 5,
     justifyContent: "center",
     alignItems: "center",
   },
 });
-
-const pickerSelectStyles = {
-  inputIOS: {
-    color: "#FFFFFF",
-    padding: 10,
-    backgroundColor: "#4A4A4A",
-    borderRadius: 5,
-    fontSize: 16,
-  },
-  inputAndroid: {
-    color: "#FFFFFF",
-    padding: 10,
-    backgroundColor: "#4A4A4A",
-    borderRadius: 5,
-    fontSize: 16,
-  },
-  placeholder: {
-    color: "#AAAAAA",
-  },
-};
 
 export default BudgetFilter;

@@ -1,17 +1,19 @@
-import React, { useState, useRef, useMemo } from "react";
+import { MaterialIcons } from "@expo/vector-icons";
+import React, { useMemo, useRef, useState } from "react";
 import {
-  View,
-  Text,
-  TouchableOpacity,
-  TextInput,
-  StyleSheet,
   AccessibilityInfo,
+  Alert,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import DraggableFlatList from "react-native-draggable-flatlist";
-import { MaterialIcons } from "@expo/vector-icons";
 
-import { StoredBudget } from "../types/budget";
 import useBudgetStore from "../app/store/useBudgetStore";
+import { Colors } from "../constants/Colors";
+import { StoredBudget } from "../types/budget";
 
 interface BudgetItemProps {
   budget: StoredBudget;
@@ -19,11 +21,15 @@ interface BudgetItemProps {
 
 const BudgetItem: React.FC<BudgetItemProps> = ({ budget }) => {
   const {
+    deleteExpenseFromBudget,
     updateExpenseOrder,
     updateExpenseAmount,
     updateIncomeAmount,
+    settings,
     toggleExpensePaid,
   } = useBudgetStore();
+  const theme = settings?.theme ?? "dark";
+  const colorScheme = Colors[theme];
 
   const [editingIncome, setEditingIncome] = useState(false);
   const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
@@ -31,8 +37,6 @@ const BudgetItem: React.FC<BudgetItemProps> = ({ budget }) => {
   const incomeInputRef = useRef<TextInput>(null);
 
   const bills = useMemo(() => budget.bills, [budget.bills]);
-
-  console.log("bills", bills);
 
   const announceChange = (message: string) => {
     AccessibilityInfo.announceForAccessibility(message);
@@ -56,16 +60,16 @@ const BudgetItem: React.FC<BudgetItemProps> = ({ budget }) => {
     setEditedAmount(null);
   };
 
-  const handleEditExpense = (expenseId: string, amount: number) => {
-    setEditingExpenseId(expenseId);
+  const handleEditExpense = (rowId: string, amount: number) => {
+    setEditingExpenseId(rowId);
     setEditedAmount(amount.toFixed(2));
   };
 
-  const saveExpense = (expenseId: string) => {
+  const saveExpense = (rowId: string) => {
     if (editedAmount !== null) {
       const parsedAmount = parseFloat(editedAmount);
       if (!isNaN(parsedAmount) && parsedAmount >= 0) {
-        updateExpenseAmount(budget.id, expenseId, parsedAmount);
+        updateExpenseAmount(budget.id, rowId, parsedAmount);
         announceChange(`Expense updated to ${parsedAmount.toFixed(2)}`);
       }
     }
@@ -73,11 +77,27 @@ const BudgetItem: React.FC<BudgetItemProps> = ({ budget }) => {
     setEditedAmount(null);
   };
 
-  const handleDragEnd = ({ data }: { data: any[] }) => {
-    updateExpenseOrder(
-      budget.id,
-      data.map((bill) => bill.expense)
+  const confirmDelete = (rowId: string, name: string) => {
+    Alert.alert(
+      "Confirm Delete",
+      `Delete expense: ${name}?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: () => {
+            deleteExpenseFromBudget(budget.id, rowId);
+            announceChange(`Deleted expense ${name}`);
+          },
+        },
+      ],
+      { cancelable: true }
     );
+  };
+
+  const handleDragEnd = ({ data }: { data: any[] }) => {
+    updateExpenseOrder(budget.id, data);
     announceChange("Expenses reordered successfully.");
   };
 
@@ -96,14 +116,14 @@ const BudgetItem: React.FC<BudgetItemProps> = ({ budget }) => {
     drag,
     isActive,
   }: {
-    item: { expense: any; paid: boolean };
+    item: { id: string; expense: any; paid: boolean; amount: number };
     drag: () => void;
     isActive: boolean;
   }) => {
-    const { expense, paid } = item;
+    const { id: rowId, expense, paid, amount } = item;
 
     const togglePaid = () => {
-      toggleExpensePaid(budget.id, expense.id);
+      toggleExpensePaid(budget.id, rowId, !paid);
       announceChange(
         `Expense ${expense.name} marked as ${
           paid ? "unpaid" : "paid"
@@ -113,14 +133,27 @@ const BudgetItem: React.FC<BudgetItemProps> = ({ budget }) => {
 
     return (
       <View
-        key={expense.id}
-        style={[styles.expenseRow, isActive && styles.draggingRow]}
+        key={rowId}
+        style={[
+          styles.expenseRow,
+          isActive && styles.draggingRow,
+          { backgroundColor: colorScheme.cardBackground },
+        ]}
         accessible={true}
         accessibilityLabel={`Expense item: ${
           expense.name
         }, amount ${expense.amount.toFixed(2)}, ${paid ? "paid" : "not paid"}`}
         accessibilityRole="adjustable"
       >
+        <View style={styles.deleteWrapper}>
+          <TouchableOpacity
+            onPress={() => confirmDelete(rowId, expense.name)}
+            accessible={true}
+            accessibilityLabel={`Delete ${expense.name}`}
+          >
+            <MaterialIcons name="delete" size={24} color={colorScheme.icon} />
+          </TouchableOpacity>
+        </View>
         <TouchableOpacity
           onLongPress={drag}
           style={styles.expenseItem}
@@ -129,37 +162,66 @@ const BudgetItem: React.FC<BudgetItemProps> = ({ budget }) => {
           accessibilityHint="Long press and drag to reorder expenses"
         >
           <View style={styles.expenseLeft}>
-            <Text style={styles.expenseName}>{expense.name}</Text>
-            <Text style={styles.expenseDate}>
+            <Text
+              style={[
+                styles.expenseName,
+                {
+                  color: colorScheme.text,
+                },
+              ]}
+            >
+              {expense.name}
+            </Text>
+            <Text
+              style={[
+                styles.expenseDate,
+                {
+                  color: colorScheme.text,
+                },
+              ]}
+            >
               {new Date(expense.date).toDateString()}
             </Text>
           </View>
 
-          {editingExpenseId === expense.id ? (
+          {editingExpenseId === rowId ? (
             <TextInput
               placeholder="Enter amount"
-              style={styles.expenseInput}
-              placeholderTextColor="#CCCCCC"
+              style={[
+                styles.expenseInput,
+                {
+                  backgroundColor: colorScheme.pickerBackground,
+                  color: colorScheme.text,
+                },
+              ]}
+              placeholderTextColor={colorScheme.buttonText}
               keyboardType="decimal-pad"
               value={editedAmount || ""}
               onChangeText={(text) =>
                 setEditedAmount(validateDecimalInput(text))
               }
-              onSubmitEditing={() => saveExpense(expense.id)}
-              onBlur={() => saveExpense(expense.id)}
+              onSubmitEditing={() => saveExpense(rowId)}
+              onBlur={() => saveExpense(rowId)}
               accessibilityLabel={`Edit expense amount for ${expense.name}`}
               maxLength={15}
             />
           ) : (
             <TouchableOpacity
-              onPress={() => handleEditExpense(expense.id, expense.amount)}
+              onPress={() => handleEditExpense(rowId, amount)}
               accessible={true}
               accessibilityLabel={`Expense amount ${expense.amount.toFixed(
                 2
               )}, tap to edit`}
             >
-              <Text style={styles.expenseAmount}>
-                ${expense.amount.toFixed(2)}
+              <Text
+                style={[
+                  styles.expenseAmount,
+                  {
+                    color: colorScheme.text,
+                  },
+                ]}
+              >
+                ${amount.toFixed(2)}
               </Text>
             </TouchableOpacity>
           )}
@@ -177,27 +239,38 @@ const BudgetItem: React.FC<BudgetItemProps> = ({ budget }) => {
     );
   };
 
-  const totalExpenses = bills.reduce(
-    (sum, { expense }) => sum + expense.amount,
-    0
-  );
+  const totalExpenses = bills.reduce((sum, { amount }) => sum + amount, 0);
   const remainingBalance = budget.income.amount - totalExpenses;
 
   return (
-    <View style={styles.budgetContainer}>
+    <View
+      style={[
+        styles.budgetContainer,
+        { backgroundColor: colorScheme.background },
+      ]}
+    >
       <View style={styles.budgetHeader}>
-        <Text style={styles.budgetTitle}>
+        <Text style={[styles.budgetTitle, { color: colorScheme.text }]}>
           Budget for {new Date(budget.date).toLocaleDateString()}
         </Text>
       </View>
 
       <View style={styles.incomeRow}>
-        <Text style={styles.label}>{budget.income.name}:</Text>
+        <Text
+          style={[
+            styles.label,
+            {
+              color: colorScheme.text,
+            },
+          ]}
+        >
+          {budget.income.name}:
+        </Text>
         {editingIncome ? (
           <TextInput
             ref={incomeInputRef}
             placeholder="Enter amount"
-            style={styles.incomeInput}
+            style={[styles.incomeInput, { color: colorScheme.text }]}
             keyboardType="decimal-pad"
             value={editedAmount || ""}
             onChangeText={(text) => setEditedAmount(validateDecimalInput(text))}
@@ -206,7 +279,12 @@ const BudgetItem: React.FC<BudgetItemProps> = ({ budget }) => {
           />
         ) : (
           <TouchableOpacity onPress={handleEditIncome}>
-            <Text style={styles.incomeAmount}>
+            <Text
+              style={[
+                styles.incomeAmount,
+                { color: colorScheme.summaryAmount },
+              ]}
+            >
               ${budget.income.amount.toFixed(2)}
             </Text>
           </TouchableOpacity>
@@ -215,17 +293,24 @@ const BudgetItem: React.FC<BudgetItemProps> = ({ budget }) => {
 
       <DraggableFlatList
         data={bills}
-        keyExtractor={(item) => item.expense.id}
+        keyExtractor={(item) => item.id}
         onDragEnd={handleDragEnd}
         renderItem={renderItem}
       />
 
       <View style={styles.summaryRow}>
-        <Text style={styles.summaryLabel}>Remaining Balance:</Text>
+        <Text style={[styles.summaryLabel, { color: colorScheme.text }]}>
+          Remaining Balance:
+        </Text>
         <Text
           style={[
             styles.summaryAmount,
-            remainingBalance < 0 && styles.negativeBalance,
+            {
+              color:
+                remainingBalance < 0
+                  ? colorScheme.negativeBalance
+                  : colorScheme.summaryAmount,
+            },
           ]}
         >
           ${remainingBalance.toFixed(2)}
@@ -238,7 +323,6 @@ const BudgetItem: React.FC<BudgetItemProps> = ({ budget }) => {
 const styles = StyleSheet.create({
   budgetContainer: {
     padding: 16,
-    backgroundColor: "#1E1E1E",
     borderRadius: 10,
     marginBottom: 16,
   },
@@ -250,7 +334,13 @@ const styles = StyleSheet.create({
   budgetTitle: {
     fontSize: 20,
     fontWeight: "bold",
-    color: "#FFFFFF",
+  },
+  billItem: {
+    padding: 10,
+    borderWidth: 1,
+    marginBottom: 5,
+    borderColor: "#ccc",
+    borderRadius: 5,
   },
   incomeRow: {
     flexDirection: "row",
@@ -259,25 +349,25 @@ const styles = StyleSheet.create({
   },
   label: {
     fontSize: 16,
-    color: "#AAAAAA",
+  },
+  deleteWrapper: {
+    justifyContent: "center",
+    margin: 5,
   },
   incomeAmount: {
     fontSize: 16,
     fontWeight: "bold",
-    color: "#00FF7F",
   },
   incomeInput: {
     fontSize: 16,
-    color: "#FFFFFF",
-    backgroundColor: "#2E2E2E",
-    padding: 8,
+    padding: 0,
   },
   expenseRow: {
     flexDirection: "row",
     padding: 10,
+    paddingLeft: 0,
     marginBottom: 8,
     borderRadius: 8,
-    backgroundColor: "#2E2E2E",
   },
   draggingRow: {
     backgroundColor: "#4A90E2",
@@ -293,21 +383,16 @@ const styles = StyleSheet.create({
   },
   expenseName: {
     fontSize: 16,
-    color: "#FFFFFF",
   },
   expenseDate: {
     fontSize: 14,
-    color: "#AAAAAA",
   },
   expenseAmount: {
     fontSize: 16,
     fontWeight: "bold",
-    color: "#FFA500",
   },
   expenseInput: {
     fontSize: 16,
-    color: "#FFFFFF",
-    backgroundColor: "#333333",
     borderRadius: 5,
     padding: 8,
   },
@@ -321,12 +406,10 @@ const styles = StyleSheet.create({
   },
   summaryLabel: {
     fontSize: 16,
-    color: "#FFFFFF",
   },
   summaryAmount: {
     fontSize: 16,
     fontWeight: "bold",
-    color: "#00FF7F",
   },
   negativeBalance: {
     color: "#FF6347",

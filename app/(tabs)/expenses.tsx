@@ -1,37 +1,39 @@
+import { MaterialIcons } from "@expo/vector-icons";
+import { Picker } from "@react-native-picker/picker";
+import { debounce } from "lodash";
 import React, {
-  useState,
-  useEffect,
-  useCallback,
-  useMemo,
   SetStateAction,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
 } from "react";
 import {
-  View,
-  FlatList,
   Alert,
-  Text,
   Button,
+  FlatList,
   KeyboardAvoidingView,
-  StyleSheet,
   Platform,
+  StyleSheet,
+  Text,
   TextInput,
+  View,
 } from "react-native";
-import { Picker } from "@react-native-picker/picker";
-import { MaterialIcons } from "@expo/vector-icons";
-import { debounce } from "lodash";
 
-import { ExpenseInterface } from "../../types/expense";
+import useBudgetStore from "../../app/store/useBudgetStore";
 import FinancialForm from "../../components/FinancialForm";
 import ListItem from "../../components/ListItem";
-import useBudgetStore from "../../app/store/useBudgetStore";
+import { Colors } from "../../constants/Colors";
+import { ExpenseInterface } from "../../types/expense";
 
 const Expenses: React.FC = React.memo(() => {
-  const expenses = useBudgetStore((state) => state.expenses);
+  const { expenses, settings } = useBudgetStore();
   const addOrUpdateExpense = useBudgetStore(
     (state) => state.addOrUpdateExpense
   );
   const deleteExpense = useBudgetStore((state) => state.deleteExpense);
-  const loadExpenses = useBudgetStore((state) => state.loadExpenses);
+  const loadExpenses = useBudgetStore((state) => state.getExpenses);
+  const colorScheme = settings?.theme === "dark" ? Colors.dark : Colors.light;
 
   const [expenseForm, setExpenseForm] = useState<Partial<ExpenseInterface>>({});
   const [isEditing, setIsEditing] = useState<boolean>(false);
@@ -81,7 +83,7 @@ const Expenses: React.FC = React.memo(() => {
       };
     }
 
-    addOrUpdateExpense(expenseForm, frequency, isEditing);
+    addOrUpdateExpense(expenseForm);
     resetForm();
   }, [expenseForm, isEditing, addOrUpdateExpense]);
 
@@ -151,8 +153,15 @@ const Expenses: React.FC = React.memo(() => {
 
   if (error) {
     return (
-      <View style={styles.errorContainer}>
-        <Text style={styles.errorText}>{error}</Text>
+      <View
+        style={[
+          styles.errorContainer,
+          { backgroundColor: colorScheme.background },
+        ]}
+      >
+        <Text style={[styles.errorText, { color: colorScheme.text }]}>
+          {error}
+        </Text>
         <Button title="Retry" onPress={memoizedLoadExpenses} />
       </View>
     );
@@ -161,7 +170,10 @@ const Expenses: React.FC = React.memo(() => {
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === "ios" ? "padding" : "height"}
-      style={styles.container}
+      style={[
+        styles.container,
+        { backgroundColor: colorScheme.cardBackground },
+      ]}
     >
       {showForm ? (
         <FinancialForm
@@ -187,9 +199,16 @@ const Expenses: React.FC = React.memo(() => {
           <View style={styles.searchFilterContainer}>
             <View style={styles.searchInputWrapper}>
               <TextInput
-                style={styles.searchInput}
+                style={[
+                  styles.searchInput,
+                  {
+                    backgroundColor: colorScheme.pickerBackground,
+                    color: colorScheme.text,
+                    borderColor: colorScheme.borderBottomColor,
+                  },
+                ]}
                 placeholder="Search expenses..."
-                placeholderTextColor="#666"
+                placeholderTextColor={colorScheme.text}
                 value={searchTerm}
                 onChangeText={(text) => {
                   setSearchTerm(text);
@@ -197,11 +216,19 @@ const Expenses: React.FC = React.memo(() => {
                 }}
               />
             </View>
-            <View style={styles.pickerWrapper}>
+            <View
+              style={[
+                styles.pickerWrapper,
+                {
+                  backgroundColor: colorScheme.pickerBackground,
+                  borderColor: colorScheme.buttonBorder,
+                },
+              ]}
+            >
               <MaterialIcons
                 name={filterOption === "date" ? "event" : "sort-by-alpha"}
                 size={24}
-                color="#333"
+                color={colorScheme.text}
                 style={styles.pickerIcon}
               />
               <Picker
@@ -276,8 +303,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     borderWidth: 1,
     borderRadius: 8,
-    backgroundColor: "#333",
-    color: "#FFF",
   },
   pickerWrapper: {
     flexDirection: "row",
@@ -287,12 +312,10 @@ const styles = StyleSheet.create({
     height: 42,
     borderWidth: 1,
     borderRadius: 8,
-    backgroundColor: "#333",
     paddingHorizontal: 8,
   },
   pickerIcon: {
     marginRight: 4,
-    color: "#FFF",
   },
   hiddenPicker: {
     flex: 1,

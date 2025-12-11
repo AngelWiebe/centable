@@ -10,13 +10,15 @@ import { StatusBar } from "expo-status-bar";
 import { useEffect } from "react";
 import "react-native-reanimated";
 
-import { useColorScheme } from "../hooks/useColorScheme";
+import { Colors } from "../constants/Colors";
+import useBudgetStore from "./store/useBudgetStore";
 
-// Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
-  const colorScheme = useColorScheme();
+  const { settings } = useBudgetStore();
+  const colorScheme = settings?.theme === "dark" ? Colors.dark : Colors.light;
+
   const [loaded] = useFonts({
     SpaceMono: require("../assets/fonts/SpaceMono-Regular.ttf"),
   });
@@ -32,20 +34,24 @@ export default function RootLayout() {
   }
 
   return (
-    <ThemeProvider value={colorScheme === "dark" ? DarkTheme : DefaultTheme}>
+    <ThemeProvider
+      value={settings?.theme === "dark" ? DarkTheme : DefaultTheme}
+    >
       <Stack
         screenOptions={{
           headerShown: true,
-          headerTintColor: "#333",
+          headerTintColor: colorScheme.text,
           headerTitleStyle: { fontWeight: "bold" },
           headerTitleAlign: "center",
         }}
       >
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="+not-found" />
-        <Stack.Screen name="reports" options={{ title: "Reports" }} />
       </Stack>
-      <StatusBar style="auto" />
+      {/* <StatusBar style="auto" /> */}
+      <StatusBar
+        style={settings?.theme === "dark" ? "light" : "dark"}
+      />
     </ThemeProvider>
   );
 }
