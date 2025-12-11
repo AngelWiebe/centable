@@ -76,7 +76,7 @@ const Incomes: React.FC = React.memo(() => {
         ]
       );
     },
-    [deleteIncome]
+    [deleteIncome, refreshBudgets]
   );
 
   const renderIncomeItem = useCallback(
