@@ -1,16 +1,16 @@
-import { FrequencyUnit } from "@/types/frequency";
+import { FrequencyUnit } from "../types/frequency";
 
 export const getNextOccurrenceDate = (
-    date: Date,
-    frequency: { value: number; unit: FrequencyUnit }
-  ): Date => {
-    const currentDate = new Date();
-    const nextDate = new Date(date);
-  
-    if (nextDate >= currentDate) {
-      return nextDate; // Return the original date if it hasn't yet passed
-    }
-  
+  date: Date,
+  frequency: { value: number; unit: FrequencyUnit }
+): Date => {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const nextDate = new Date(date);
+  nextDate.setHours(0, 0, 0, 0);
+
+  while (nextDate <= today) {
     switch (frequency.unit) {
       case "days":
         nextDate.setDate(nextDate.getDate() + frequency.value);
@@ -30,9 +30,9 @@ export const getNextOccurrenceDate = (
         }
         break;
       default:
-        break;
+        throw new Error(`Unsupported frequency unit: ${frequency.unit}`);
     }
-  
-    return nextDate;
-  };
-  
+  }
+
+  return nextDate;
+};

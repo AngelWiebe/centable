@@ -1,43 +1,58 @@
+import { MaterialIcons } from "@expo/vector-icons";
 import { Tabs, useRouter } from "expo-router";
-import React from "react";
 import { Image, Platform, TouchableOpacity } from "react-native";
 
 import { HapticTab } from "../../components/HapticTab";
-import { IconSymbol } from "../../components/ui/IconSymbol";
 import TabBarBackground from "../../components/ui/TabBarBackground";
 import { Colors } from "../../constants/Colors";
-import { useColorScheme } from "../../hooks/useColorScheme";
+import useBudgetStore from "../store/useBudgetStore";
 
 export default function TabLayout() {
-  const colorScheme = useColorScheme();
+  const { settings } = useBudgetStore();
+  const colorScheme = settings?.theme === "dark" ? Colors.dark : Colors.light;
   const router = useRouter();
 
   return (
     <Tabs
       screenOptions={{
-        tabBarActiveTintColor: Colors[colorScheme ?? "light"].tint,
+        tabBarActiveTintColor: colorScheme.tabIconSelected,
         tabBarButton: HapticTab,
         tabBarBackground: TabBarBackground,
         tabBarStyle: Platform.select({
           ios: {
-            position: "absolute", // Transparent background for blur effect on iOS
+            position: "absolute",
           },
           default: {},
         }),
         headerShown: true,
-        headerTintColor: "#FFF",
+        headerTintColor: colorScheme.text,
         headerTitleAlign: "center",
-        headerStyle: { backgroundColor: "#151718" },
+        headerStyle: {
+          backgroundColor: colorScheme.background,
+          shadowColor: colorScheme.shadowColor,
+          shadowOffset: { width: 0, height: 4 },
+          shadowOpacity: 0.6,
+          shadowRadius: 7,
+          elevation: 15,
+        },
         headerLeft: () => (
           <TouchableOpacity
-            onPress={() => router.push("/")} // Navigate back to Home tab
+            onPress={() => router.push("/")}
             style={{ marginLeft: 15 }}
           >
             <Image
-              source={require("../../assets/images/icon.png")} // Load icon from assets
+              source={require("../../assets/images/icon.png")}
               style={{ width: 30, height: 30 }}
               resizeMode="contain"
             />
+          </TouchableOpacity>
+        ),
+        headerRight: () => (
+          <TouchableOpacity
+            onPress={() => router.push("/settings")}
+            style={{ marginRight: 15 }}
+          >
+            <MaterialIcons name="settings" size={28} color={colorScheme.text} />
           </TouchableOpacity>
         ),
       }}
@@ -45,7 +60,14 @@ export default function TabLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          headerShown: false,
+          title: "Recommendations",
+          tabBarItemStyle: { display: "none" },
+        }}
+      />
+      <Tabs.Screen
+        name="settings"
+        options={{
+          title: "Settings",
           tabBarItemStyle: { display: "none" },
         }}
       />
@@ -55,17 +77,17 @@ export default function TabLayout() {
           title: "Expense Tracker",
           tabBarLabel: "Expenses",
           tabBarIcon: ({ color }) => (
-            <IconSymbol size={28} name="minus.circle.fill" color={color} />
+            <MaterialIcons name="remove-circle" size={28} color={color} />
           ),
         }}
       />
       <Tabs.Screen
         name="incomes"
         options={{
-          title: "Incomes",
-          tabBarLabel: "Income Tracker",
+          tabBarLabel: "Incomes",
+          title: "Income Tracker",
           tabBarIcon: ({ color }) => (
-            <IconSymbol size={28} name="plus.circle.fill" color={color} />
+            <MaterialIcons name="add-circle" size={28} color={color} />
           ),
         }}
       />
@@ -74,7 +96,7 @@ export default function TabLayout() {
         options={{
           title: "Budgets",
           tabBarIcon: ({ color }) => (
-            <IconSymbol size={28} name="chart.pie.fill" color={color} />
+            <MaterialIcons name="pie-chart" size={28} color={color} />
           ),
         }}
       />
@@ -83,7 +105,7 @@ export default function TabLayout() {
         options={{
           title: "Reports",
           tabBarIcon: ({ color }) => (
-            <IconSymbol size={28} name="doc.text.fill" color={color} />
+            <MaterialIcons name="insert-chart" size={28} color={color} />
           ),
         }}
       />
