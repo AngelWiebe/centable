@@ -108,6 +108,19 @@ export const setupDatabase = async () => {
       theme TEXT NOT NULL DEFAULT 'dark'
     );
   `);
+
+  // Initialize settings if they don't exist
+  const existingSettings = await db.getFirstAsync<{ id: string }>(
+    "SELECT id FROM settings WHERE id = ?;",
+    ["settings_id"]
+  );
+
+  if (!existingSettings) {
+    await db.runAsync(
+      "INSERT INTO settings (id, currency, theme) VALUES (?, ?, ?);",
+      ["settings_id", "CAD", "dark"]
+    );
+  }
 };
 
 //
@@ -713,10 +726,19 @@ export const updateIncomeAmountInDB = async (
  */
 export const updateCurrency = async (currency: string) => {
   if (!db) return;
-  await db.runAsync("UPDATE settings SET currency = ? WHERE id = ?;", [
-    currency,
-    "settings_id",
-  ]);
+
+  // Get current theme to preserve it
+  const currentSettings = await db.getFirstAsync<{ theme: string }>(
+    "SELECT theme FROM settings WHERE id = ?;",
+    ["settings_id"]
+  );
+
+  const theme = currentSettings?.theme || "dark";
+
+  await db.runAsync(
+    "INSERT INTO settings (id, currency, theme) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET currency = excluded.currency;",
+    ["settings_id", currency, theme]
+  );
 };
 
 /**
@@ -724,10 +746,19 @@ export const updateCurrency = async (currency: string) => {
  */
 export const updateTheme = async (theme: "light" | "dark") => {
   if (!db) return;
-  await db.runAsync("UPDATE settings SET theme = ? WHERE id = ?;", [
-    theme,
-    "settings_id",
-  ]);
+
+  // Get current currency to preserve it
+  const currentSettings = await db.getFirstAsync<{ currency: string }>(
+    "SELECT currency FROM settings WHERE id = ?;",
+    ["settings_id"]
+  );
+
+  const currency = currentSettings?.currency || "CAD";
+
+  await db.runAsync(
+    "INSERT INTO settings (id, currency, theme) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET theme = excluded.theme;",
+    ["settings_id", currency, theme]
+  );
 };
 
 /**

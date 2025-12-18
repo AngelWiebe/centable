@@ -11,6 +11,7 @@ import useBudgetStore from "../app/store/useBudgetStore";
 import { Colors } from "../constants/Colors";
 import { ExpenseInterface } from "../types/expense";
 import { IncomeInterface } from "../types/income";
+import { currencySettings } from "../types/settings";
 import { getNextOccurrenceDate } from "../utils/getNext";
 
 interface ListItemInterface {
@@ -27,6 +28,7 @@ const ListItem: React.FC<ListItemInterface> = ({
   const { settings } = useBudgetStore();
   const theme = settings?.theme ?? "dark";
   const colorScheme = Colors[theme];
+  const { symbol, decimals } = currencySettings[settings?.currency || "CAD"];
 
   const nextOccurrenceDate = item.frequency
     ? getNextOccurrenceDate(new Date(item.date), item.frequency)
@@ -53,10 +55,10 @@ const ListItem: React.FC<ListItemInterface> = ({
         </Text>
         <Text
           style={[styles.amount, { color: colorScheme.text }]}
-          accessibilityLabel={`Amount: $${item.amount.toFixed(2)}`}
+          accessibilityLabel={`Amount: ${symbol}${item.amount.toFixed(decimals)}`}
           accessibilityRole="text"
         >
-          ${item.amount.toFixed(2)}
+          {symbol}{item.amount.toFixed(decimals)}
         </Text>
       </View>
       {item.frequency && (

@@ -16,12 +16,19 @@ import useBudgetStore from "./store/useBudgetStore";
 SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
-  const { settings } = useBudgetStore();
+  const { settings, fetchAndCleanBudgets } = useBudgetStore();
   const colorScheme = settings?.theme === "dark" ? Colors.dark : Colors.light;
 
   const [loaded] = useFonts({
     SpaceMono: require("../assets/fonts/SpaceMono-Regular.ttf"),
   });
+
+  useEffect(() => {
+    // Load settings and data on app startup
+    fetchAndCleanBudgets().catch((error) =>
+      console.error("❌ Failed to load data:", error)
+    );
+  }, []);
 
   useEffect(() => {
     if (loaded) {

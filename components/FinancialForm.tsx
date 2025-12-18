@@ -49,7 +49,10 @@ const FinancialForm = <T extends { id: string; date: Date }>({
   // For new entries, default to recurring. For edits, check if frequency exists
   const [isOneTime, setIsOneTime] = useState<boolean>(() => {
     // If editing and frequency is explicitly null/undefined, it's one-time
-    if (isEditing && (formData.frequency === null || formData.frequency === undefined)) {
+    if (
+      isEditing &&
+      (formData.frequency === null || formData.frequency === undefined)
+    ) {
       return true;
     }
     // If frequency exists but has no unit, it's one-time
@@ -87,7 +90,7 @@ const FinancialForm = <T extends { id: string; date: Date }>({
   useEffect(() => {
     // Initialize frequency to 1 month on first load if not set and not one-time
     const hasFrequency = formData.frequency && formData.frequency.unit;
-    
+
     // If no frequency is set and it's not one-time, default to 1 month
     if (!hasFrequency && !isOneTime) {
       setFormData({
@@ -115,7 +118,7 @@ const FinancialForm = <T extends { id: string; date: Date }>({
       setFormData({
         ...formData,
         frequency: {
-          value: text === "" ? "" : parseInt(text, 10),
+          value: text === "" ? undefined : parseInt(text, 10),
           unit: formData.frequency?.unit || "months",
         },
       });
@@ -268,14 +271,21 @@ const FinancialForm = <T extends { id: string; date: Date }>({
             <View style={styles.frequencyContainer}>
               <TextInput
                 placeholder="1"
-                value={formData.frequency?.value?.toString() || "1"}
+                value={
+                  formData.frequency?.unit === "semi-monthly"
+                    ? "1"
+                    : formData.frequency?.value?.toString() || ""
+                }
                 onChangeText={handleFrequencyChange}
+                editable={formData.frequency?.unit !== "semi-monthly"}
                 style={[
                   styles.frequencyInput,
                   {
                     backgroundColor: colorScheme.cardBackground,
                     color: colorScheme.text,
                     borderColor: colorScheme.borderBottomColor,
+                    opacity:
+                      formData.frequency?.unit === "semi-monthly" ? 0.5 : 1,
                   },
                 ]}
                 keyboardType="numeric"
@@ -292,15 +302,18 @@ const FinancialForm = <T extends { id: string; date: Date }>({
               >
                 <Picker
                   selectedValue={formData.frequency?.unit || "months"}
-                  onValueChange={(itemValue) =>
+                  onValueChange={(itemValue) => {
+                    const isSemiMonthly = itemValue === "semi-monthly";
                     setFormData({
                       ...formData,
                       frequency: {
-                        value: formData.frequency?.value || 1,
+                        value: isSemiMonthly
+                          ? 1
+                          : formData.frequency?.value || 1,
                         unit: itemValue as FrequencyInterface["unit"],
                       },
-                    })
-                  }
+                    });
+                  }}
                   style={[styles.picker, { color: colorScheme.text }]}
                 >
                   <Picker.Item label="Days" value="days" />

@@ -14,6 +14,7 @@ import DraggableFlatList from "react-native-draggable-flatlist";
 import useBudgetStore from "../app/store/useBudgetStore";
 import { Colors } from "../constants/Colors";
 import { StoredBudget } from "../types/budget";
+import { currencySettings } from "../types/settings";
 
 interface BudgetItemProps {
   budget: StoredBudget;
@@ -30,6 +31,7 @@ const BudgetItem: React.FC<BudgetItemProps> = ({ budget }) => {
   } = useBudgetStore();
   const theme = settings?.theme ?? "dark";
   const colorScheme = Colors[theme];
+  const { symbol, decimals } = currencySettings[settings?.currency || "CAD"];
 
   const [editingIncome, setEditingIncome] = useState(false);
   const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
@@ -44,7 +46,7 @@ const BudgetItem: React.FC<BudgetItemProps> = ({ budget }) => {
 
   const handleEditIncome = () => {
     setEditingIncome(true);
-    setEditedAmount(budget.income.amount.toFixed(2));
+    setEditedAmount(budget.income.amount.toFixed(decimals));
     setTimeout(() => incomeInputRef.current?.focus(), 100);
   };
 
@@ -53,7 +55,7 @@ const BudgetItem: React.FC<BudgetItemProps> = ({ budget }) => {
       const parsedAmount = parseFloat(editedAmount);
       if (!isNaN(parsedAmount) && parsedAmount >= 0) {
         updateIncomeAmount(budget.id, parsedAmount);
-        announceChange(`Income updated to ${parsedAmount.toFixed(2)}`);
+        announceChange(`Income updated to ${symbol}${parsedAmount.toFixed(decimals)}`);
       }
     }
     setEditingIncome(false);
@@ -62,7 +64,7 @@ const BudgetItem: React.FC<BudgetItemProps> = ({ budget }) => {
 
   const handleEditExpense = (rowId: string, amount: number) => {
     setEditingExpenseId(rowId);
-    setEditedAmount(amount.toFixed(2));
+    setEditedAmount(amount.toFixed(decimals));
   };
 
   const saveExpense = (rowId: string) => {
@@ -70,7 +72,7 @@ const BudgetItem: React.FC<BudgetItemProps> = ({ budget }) => {
       const parsedAmount = parseFloat(editedAmount);
       if (!isNaN(parsedAmount) && parsedAmount >= 0) {
         updateExpenseAmount(budget.id, rowId, parsedAmount);
-        announceChange(`Expense updated to ${parsedAmount.toFixed(2)}`);
+        announceChange(`Expense updated to ${symbol}${parsedAmount.toFixed(decimals)}`);
       }
     }
     setEditingExpenseId(null);
@@ -209,8 +211,8 @@ const BudgetItem: React.FC<BudgetItemProps> = ({ budget }) => {
             <TouchableOpacity
               onPress={() => handleEditExpense(rowId, amount)}
               accessible={true}
-              accessibilityLabel={`Expense amount ${expense.amount.toFixed(
-                2
+              accessibilityLabel={`Expense amount ${symbol}${expense.amount.toFixed(
+                decimals
               )}, tap to edit`}
             >
               <Text
@@ -221,7 +223,7 @@ const BudgetItem: React.FC<BudgetItemProps> = ({ budget }) => {
                   },
                 ]}
               >
-                ${amount.toFixed(2)}
+                {symbol}{amount.toFixed(decimals)}
               </Text>
             </TouchableOpacity>
           )}
@@ -287,7 +289,7 @@ const BudgetItem: React.FC<BudgetItemProps> = ({ budget }) => {
                 { color: colorScheme.summaryAmount },
               ]}
             >
-              ${budget.income.amount.toFixed(2)}
+              {symbol}{budget.income.amount.toFixed(decimals)}
             </Text>
           </TouchableOpacity>
         )}
@@ -315,7 +317,7 @@ const BudgetItem: React.FC<BudgetItemProps> = ({ budget }) => {
             },
           ]}
         >
-          ${remainingBalance.toFixed(2)}
+          {symbol}{remainingBalance.toFixed(decimals)}
         </Text>
       </View>
     </View>
