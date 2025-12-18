@@ -301,7 +301,9 @@ const useBudgetStore = create<BudgetState>((set, get) => ({
       if (!assigned) {
         failedExpenses.push(expense);
         console.warn(
-          `Expense "${expense.name}" (${expenseDate.toISOString()}) could not be assigned to any budget`
+          `Expense "${
+            expense.name
+          }" (${expenseDate.toISOString()}) could not be assigned to any budget`
         );
       }
     }
@@ -352,7 +354,9 @@ const useBudgetStore = create<BudgetState>((set, get) => ({
           const incomeDate = new Date(income.date);
           return incomeDate >= startDate && incomeDate <= endDate;
         })
-        .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+        .sort(
+          (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
+        );
 
       // Sort expenses by highest amount first, then by date
       const allExpenses = allExpensesRaw
@@ -379,6 +383,7 @@ const useBudgetStore = create<BudgetState>((set, get) => ({
         budgets.map((budget) => [`${budget.income.id}-${budget.date}`, budget])
       );
       // Build existing overrides for each budget occurrence by expense id
+      // Only preserve amounts that differ from the expense amount (manual overrides)
       const existingByIncomeId: Record<
         string,
         Record<string, { amount: number; paid: boolean }>
@@ -387,10 +392,34 @@ const useBudgetStore = create<BudgetState>((set, get) => ({
         const key = `${b.income.id}-${b.date}`;
         existingByIncomeId[key] = existingByIncomeId[key] || {};
         b.bills.forEach((bill) => {
-          existingByIncomeId[key][bill.expense.id] = {
-            amount: bill.amount,
-            paid: bill.paid,
-          };
+          // Find the current expense to compare amounts
+          const currentExpense = expenses.find((e) => e.id === bill.expense.id);
+
+          if (currentExpense) {
+            // Check if bill amount differs from current expense amount
+            // If it matches, it means it wasn't manually overridden, so use current expense amount
+            // If it differs, it was manually overridden, so preserve it
+            if (Math.abs(bill.amount - currentExpense.amount) > 0.01) {
+              // This is a manual override (amounts differ), preserve it
+              existingByIncomeId[key][bill.expense.id] = {
+                amount: bill.amount,
+                paid: bill.paid,
+              };
+            } else {
+              // Amount matches expense (within rounding), use current expense amount
+              // This ensures expense amount changes are reflected
+              existingByIncomeId[key][bill.expense.id] = {
+                amount: currentExpense.amount,
+                paid: bill.paid,
+              };
+            }
+          } else {
+            // Expense not found (might have been deleted), preserve as-is for now
+            existingByIncomeId[key][bill.expense.id] = {
+              amount: bill.amount,
+              paid: bill.paid,
+            };
+          }
         });
       });
       const failedExpenses: ExpenseInterface[] = [];
@@ -425,7 +454,9 @@ const useBudgetStore = create<BudgetState>((set, get) => ({
           }
           return createBudget(income);
         })
-        .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+        .sort(
+          (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
+        );
 
       // Assign each expense to the nearest income that occurs BEFORE it
       // Expenses are already sorted by highest amount first
@@ -475,7 +506,9 @@ const useBudgetStore = create<BudgetState>((set, get) => ({
         if (!assigned) {
           failedExpenses.push(expense);
           console.warn(
-            `Expense "${expense.name}" (${expenseDate.toISOString()}) could not be assigned to any budget`
+            `Expense "${
+              expense.name
+            }" (${expenseDate.toISOString()}) could not be assigned to any budget`
           );
         }
       }

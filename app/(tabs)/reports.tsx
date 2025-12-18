@@ -1,5 +1,6 @@
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { printToFileAsync } from "expo-print";
+import * as Sharing from "expo-sharing";
 import React, { useEffect, useState } from "react";
 import {
   Alert,
@@ -207,23 +208,64 @@ const Reports: React.FC = () => {
       `;
 
       const file = await printToFileAsync({ html, base64: false });
-      const newPath = `${FileSystem.documentDirectory}Budget_Report.pdf`;
 
-      await FileSystem.moveAsync({ from: file.uri, to: newPath });
+      if (!FileSystem || !FileSystem.documentDirectory) {
+        Alert.alert(
+          "Not Available",
+          "PDF export requires a development build. Please rebuild the app with 'npx expo run:android' or 'npx expo run:ios'."
+        );
+        return;
+      }
 
-      Alert.alert("Success", `Report saved to:\n${newPath}`);
+      const fileName = `Budget_Report_${
+        new Date().toISOString().split("T")[0]
+      }.pdf`;
+      const newPath = `${FileSystem.documentDirectory}${fileName}`;
 
-      if (Platform.OS === "android" && IntentLauncher) {
-        const contentUri = await FileSystem.getContentUriAsync(newPath);
-        await IntentLauncher.startActivityAsync("android.intent.action.VIEW", {
-          data: contentUri,
-          flags: 1,
-          type: "application/pdf",
+      // Copy file to a permanent location
+      await FileSystem.copyAsync({ from: file.uri, to: newPath });
+
+      // Check if sharing is available
+      const isAvailable = await Sharing.isAvailableAsync();
+
+      if (isAvailable) {
+        // Share/download the PDF
+        await Sharing.shareAsync(newPath, {
+          mimeType: "application/pdf",
+          dialogTitle: "Save Budget Report",
+          UTI: "com.adobe.pdf",
         });
+      } else if (Platform.OS === "android" && IntentLauncher) {
+        // Fallback for Android: open with intent
+        try {
+          const contentUri = await FileSystem.getContentUriAsync(newPath);
+          await IntentLauncher.startActivityAsync(
+            "android.intent.action.VIEW",
+            {
+              data: contentUri,
+              flags: 1,
+              type: "application/pdf",
+            }
+          );
+        } catch (intentError) {
+          console.error("Intent launcher error:", intentError);
+          Alert.alert(
+            "Success",
+            `Report saved to:\n${newPath}\n\nYou can find it in your device's file manager.`
+          );
+        }
+      } else {
+        Alert.alert(
+          "Success",
+          `Report saved to:\n${newPath}\n\nYou can find it in your device's file manager.`
+        );
       }
     } catch (e) {
       console.error("PDF generation error", e);
-      Alert.alert("Error", "Failed to generate PDF.");
+      Alert.alert(
+        "Error",
+        `Failed to generate PDF: ${e instanceof Error ? e.message : String(e)}`
+      );
     }
   };
 
