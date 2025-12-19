@@ -613,11 +613,10 @@ const useBudgetStore = create<BudgetState>((set, get) => ({
   },
 
   deleteExpenseFromBudget: async (budgetId, id) => {
-    const { setBudgets } = get();
-
+    const currentBudgets = get().budgets;
     try {
-      await deleteExpenseFromBudgetInDB(id, budgetId);
-      const budgets = get().budgets.map((budget) =>
+      // Optimistically update state first to avoid flicker
+      const updatedBudgets = currentBudgets.map((budget) =>
         budget.id === budgetId
           ? {
               ...budget,
@@ -631,20 +630,21 @@ const useBudgetStore = create<BudgetState>((set, get) => ({
           : budget
       );
 
-      setBudgets(budgets);
+      set({ budgets: updatedBudgets });
+      // Then update database
+      await deleteExpenseFromBudgetInDB(id, budgetId);
     } catch (e) {
       console.error(e);
+      // On error, reload from database
+      const budgets = await getBudgets();
+      set({ budgets });
     }
   },
 
   updateExpenseOrder: async (budgetId, newOrder) => {
-    await updateExpenseOrderInDB(
-      budgetId,
-      newOrder.map((b: any) => ({ id: b.id }))
-    );
-    const { setBudgets } = get();
-
-    const budgets = get().budgets.map((budget) =>
+    const currentBudgets = get().budgets;
+    // Optimistically update state first to avoid flicker
+    const updatedBudgets = currentBudgets.map((budget) =>
       budget.id === budgetId
         ? {
             ...budget,
@@ -656,14 +656,19 @@ const useBudgetStore = create<BudgetState>((set, get) => ({
         : budget
     );
 
-    setBudgets(budgets);
+    set({ budgets: updatedBudgets });
+    // Then update database
+    await updateExpenseOrderInDB(
+      budgetId,
+      newOrder.map((b: any) => ({ id: b.id }))
+    );
   },
 
   updateIncomeAmount: async (budgetId, newAmount) => {
     try {
-      const { setBudgets } = get();
-      await updateIncomeAmountInDB(budgetId, newAmount);
-      const budgets = get().budgets.map((budget) =>
+      const currentBudgets = get().budgets;
+      // Optimistically update state first to avoid flicker
+      const updatedBudgets = currentBudgets.map((budget) =>
         budget.id === budgetId
           ? {
               ...budget,
@@ -678,17 +683,21 @@ const useBudgetStore = create<BudgetState>((set, get) => ({
           : budget
       );
 
-      setBudgets(budgets);
+      set({ budgets: updatedBudgets });
+      // Then update database
+      await updateIncomeAmountInDB(budgetId, newAmount);
     } catch (error) {
       console.error(error);
+      // On error, reload from database
+      const budgets = await getBudgets();
+      set({ budgets });
     }
   },
 
   updateExpenseAmount: async (budgetId, rowId, newAmount) => {
-    await updateExpenseAmountInDB(budgetId, rowId, newAmount);
-    const { setBudgets } = get();
-
-    const budgets = get().budgets.map((budget) =>
+    const currentBudgets = get().budgets;
+    // Optimistically update state first to avoid flicker
+    const updatedBudgets = currentBudgets.map((budget) =>
       budget.id === budgetId
         ? {
             ...budget,
@@ -714,7 +723,9 @@ const useBudgetStore = create<BudgetState>((set, get) => ({
         : budget
     );
 
-    setBudgets(budgets);
+    set({ budgets: updatedBudgets });
+    // Then update database
+    await updateExpenseAmountInDB(budgetId, rowId, newAmount);
   },
 
   setPaidStatusInStorage: async (budgetId, rowId, isPaid) => {
@@ -730,9 +741,9 @@ const useBudgetStore = create<BudgetState>((set, get) => ({
   },
 
   toggleExpensePaid: async (budgetId, rowId, isPaid) => {
-    await setPaidStatusInDB(budgetId, rowId, isPaid);
-
-    const updatedBudgets = get().budgets.map((budget) => {
+    const currentBudgets = get().budgets;
+    // Optimistically update state first to avoid flicker
+    const updatedBudgets = currentBudgets.map((budget) => {
       const isTargetBudget = budget.id === budgetId;
 
       if (!isTargetBudget) return budget;
@@ -753,7 +764,9 @@ const useBudgetStore = create<BudgetState>((set, get) => ({
       };
     });
 
-    get().setBudgets(updatedBudgets);
+    set({ budgets: updatedBudgets });
+    // Then update database
+    await setPaidStatusInDB(budgetId, rowId, isPaid);
   },
 
   moveExpenseBetweenBudgets: async (
