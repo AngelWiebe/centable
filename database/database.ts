@@ -30,6 +30,7 @@ type ExpenseRow = {
   paid: number;
   id: string;
   sort_order: number;
+  expense_date?: string;
 };
 
 export const resetTables = async () => {
@@ -97,10 +98,20 @@ export const setupDatabase = async () => {
       amount INTEGER NOT NULL DEFAULT 0,
       paid INTEGER NOT NULL DEFAULT 0,
       sort_order INTEGER NOT NULL DEFAULT 0,
+      expense_date TEXT,
       FOREIGN KEY (budget_id) REFERENCES budgets(id),
       FOREIGN KEY (expense_id) REFERENCES expenses(id)
     );
   `);
+
+  // Add expense_date column if it doesn't exist (for existing databases)
+  try {
+    await db.execAsync(`
+      ALTER TABLE budget_expenses ADD COLUMN expense_date TEXT;
+    `);
+  } catch (e) {
+    // Column already exists, ignore error
+  }
   await db.execAsync(`
     CREATE TABLE IF NOT EXISTS settings (
       id TEXT PRIMARY KEY NOT NULL,
@@ -371,10 +382,16 @@ export const addOrUpdateBudget = async (budget: StoredBudget) => {
     for (let index = 0; index < budget.bills.length; index++) {
       const bill = budget.bills[index];
       try {
+        // Store the expense occurrence date (not the base expense date)
+        const expenseDate =
+          typeof bill.expense.date === "string"
+            ? bill.expense.date
+            : bill.expense.date.toISOString();
+
         await db.runAsync(
-          `INSERT INTO budget_expenses (id, budget_id, expense_id, paid, amount, sort_order) 
-           VALUES (?, ?, ?, ?, ?, ?) 
-           ON CONFLICT(id) DO UPDATE SET paid = ?, amount = ?, sort_order = ?;`,
+          `INSERT INTO budget_expenses (id, budget_id, expense_id, paid, amount, sort_order, expense_date) 
+           VALUES (?, ?, ?, ?, ?, ?, ?) 
+           ON CONFLICT(id) DO UPDATE SET paid = ?, amount = ?, sort_order = ?, expense_date = ?;`,
           [
             bill.id ?? uuid.v4().toString(),
             budgetId,
@@ -382,9 +399,11 @@ export const addOrUpdateBudget = async (budget: StoredBudget) => {
             bill.paid ? 1 : 0,
             bill.amount,
             index, // Sort order
+            expenseDate,
             bill.paid ? 1 : 0,
             bill.amount,
             index,
+            expenseDate,
           ]
         );
       } catch (billError) {
@@ -436,7 +455,19 @@ export const getBudgets = async (): Promise<StoredBudget[]> => {
         const expense = await getExpenseById(baseId);
         if (!expense) continue;
 
-        bills.push({ ...expenseRow, expense, paid: expenseRow.paid === 1 });
+        // Use the stored occurrence date if available, otherwise use the base expense date
+        const expenseDate = expenseRow.expense_date
+          ? new Date(expenseRow.expense_date)
+          : expense.date;
+
+        bills.push({
+          ...expenseRow,
+          expense: {
+            ...expense,
+            date: expenseDate,
+          },
+          paid: expenseRow.paid === 1,
+        });
       }
 
       budgets.push({
@@ -487,7 +518,19 @@ export const getBudgetById = async (
     const expense = await getExpenseById(expenseRow.expense_id);
     if (!expense) continue;
 
-    bills.push({ ...expenseRow, expense, paid: expenseRow.paid === 1 });
+    // Use the stored occurrence date if available, otherwise use the base expense date
+    const expenseDate = expenseRow.expense_date
+      ? new Date(expenseRow.expense_date)
+      : expense.date;
+
+    bills.push({
+      ...expenseRow,
+      expense: {
+        ...expense,
+        date: expenseDate,
+      },
+      paid: expenseRow.paid === 1,
+    });
   }
 
   return {

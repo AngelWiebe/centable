@@ -308,6 +308,24 @@ const useBudgetStore = create<BudgetState>((set, get) => ({
       }
     }
 
+    // Sort bills by expense date for all budgets before saving
+    for (const budget of budgets) {
+      budget.remainingBalance =
+        budget.amount - budget.bills.reduce((s, b) => s + b.amount, 0);
+
+      // Sort bills by expense date, then update sort_order to preserve this order
+      budget.bills.sort((a, b) => {
+        const dateA = new Date(a.expense.date).getTime();
+        const dateB = new Date(b.expense.date).getTime();
+        return dateA - dateB;
+      });
+
+      // Update sort_order to match the date-sorted order
+      budget.bills.forEach((bill, index) => {
+        bill.sort_order = index;
+      });
+    }
+
     try {
       // Insert budgets sequentially to avoid SQLite statement conflicts
       for (const budget of budgets) {

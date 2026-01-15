@@ -55,7 +55,9 @@ const BudgetItem: React.FC<BudgetItemProps> = ({ budget }) => {
       const parsedAmount = parseFloat(editedAmount);
       if (!isNaN(parsedAmount) && parsedAmount >= 0) {
         updateIncomeAmount(budget.id, parsedAmount);
-        announceChange(`Income updated to ${symbol}${parsedAmount.toFixed(decimals)}`);
+        announceChange(
+          `Income updated to ${symbol}${parsedAmount.toFixed(decimals)}`
+        );
       }
     }
     setEditingIncome(false);
@@ -72,7 +74,9 @@ const BudgetItem: React.FC<BudgetItemProps> = ({ budget }) => {
       const parsedAmount = parseFloat(editedAmount);
       if (!isNaN(parsedAmount) && parsedAmount >= 0) {
         updateExpenseAmount(budget.id, rowId, parsedAmount);
-        announceChange(`Expense updated to ${symbol}${parsedAmount.toFixed(decimals)}`);
+        announceChange(
+          `Expense updated to ${symbol}${parsedAmount.toFixed(decimals)}`
+        );
       }
     }
     setEditingExpenseId(null);
@@ -223,7 +227,8 @@ const BudgetItem: React.FC<BudgetItemProps> = ({ budget }) => {
                   },
                 ]}
               >
-                {symbol}{amount.toFixed(decimals)}
+                {symbol}
+                {amount.toFixed(decimals)}
               </Text>
             </TouchableOpacity>
           )}
@@ -244,7 +249,8 @@ const BudgetItem: React.FC<BudgetItemProps> = ({ budget }) => {
   const totalExpenses = bills.reduce((sum, { amount }) => sum + amount, 0);
   // Use budget.remainingBalance which is already calculated and stored in the database
   // Fallback to calculated value if not available
-  const remainingBalance = budget.remainingBalance ?? (budget.amount - totalExpenses);
+  const remainingBalance =
+    budget.remainingBalance ?? budget.amount - totalExpenses;
 
   return (
     <View
@@ -289,7 +295,8 @@ const BudgetItem: React.FC<BudgetItemProps> = ({ budget }) => {
                 { color: colorScheme.summaryAmount },
               ]}
             >
-              {symbol}{budget.income.amount.toFixed(decimals)}
+              {symbol}
+              {budget.income.amount.toFixed(decimals)}
             </Text>
           </TouchableOpacity>
         )}
@@ -317,7 +324,8 @@ const BudgetItem: React.FC<BudgetItemProps> = ({ budget }) => {
             },
           ]}
         >
-          {symbol}{remainingBalance.toFixed(decimals)}
+          {symbol}
+          {remainingBalance.toFixed(decimals)}
         </Text>
       </View>
     </View>
