@@ -5,8 +5,10 @@ import { StoredBudget } from "../types/budget";
 import { ExpenseInterface } from "../types/expense";
 import { FrequencyInterface } from "../types/frequency";
 import { IncomeInterface } from "../types/income";
+import { expenseOccurrenceKey } from "../utils/buildBudgets";
 
 let db: SQLiteDatabase | null = null;
+let ready: Promise<void> | null = null;
 
 type DataRow = {
   id: string;
@@ -42,10 +44,13 @@ export const resetTables = async () => {
       DROP TABLE IF EXISTS expenses;
       DROP TABLE IF EXISTS budgets;
       DROP TABLE IF EXISTS budget_expenses;
+      DROP TABLE IF EXISTS dismissed_budget_expenses;
       DROP TABLE IF EXISTS settings;
     `);
 
     // Recreate tables
+    ready = null;
+    db = null;
     await setupDatabase();
     console.log("✅ Tables recreated successfully.");
   } catch (error) {
@@ -57,6 +62,17 @@ export const resetTables = async () => {
  * Initializes the SQLite database and creates necessary tables.
  */
 export const setupDatabase = async () => {
+  if (!ready) {
+    ready = openAndMigrateDatabase().catch((error) => {
+      ready = null;
+      db = null;
+      throw error;
+    });
+  }
+  await ready;
+};
+
+const openAndMigrateDatabase = async () => {
   db = await openDatabaseAsync("budget.db");
 
   await db.execAsync(`
@@ -112,6 +128,14 @@ export const setupDatabase = async () => {
   } catch (e) {
     // Column already exists, ignore error
   }
+  await db.execAsync(`
+    CREATE TABLE IF NOT EXISTS dismissed_budget_expenses (
+      id TEXT PRIMARY KEY NOT NULL,
+      expense_id TEXT NOT NULL,
+      expense_date TEXT NOT NULL
+    );
+  `);
+
   await db.execAsync(`
     CREATE TABLE IF NOT EXISTS settings (
       id TEXT PRIMARY KEY NOT NULL,
@@ -320,7 +344,32 @@ export const getExpenseById = async (
  */
 export const deleteExpense = async (id: string) => {
   if (!db) return;
+  await db.runAsync(
+    "DELETE FROM dismissed_budget_expenses WHERE expense_id = ?;",
+    [id]
+  );
   await db.runAsync("DELETE FROM expenses WHERE id = ?;", [id]);
+};
+
+export const dismissBudgetExpense = async (
+  expenseId: string,
+  expenseDate: Date | string
+) => {
+  if (!db) return;
+  const key = expenseOccurrenceKey(expenseId, expenseDate);
+  await db.runAsync(
+    `INSERT OR REPLACE INTO dismissed_budget_expenses (id, expense_id, expense_date)
+     VALUES (?, ?, ?);`,
+    [key, expenseId, new Date(expenseDate).toISOString()]
+  );
+};
+
+export const getDismissedBudgetExpenseKeys = async (): Promise<string[]> => {
+  if (!db) return [];
+  const rows = await db.getAllAsync<{ id: string }>(
+    "SELECT id FROM dismissed_budget_expenses;"
+  );
+  return rows.map((row) => row.id);
 };
 
 /**
@@ -377,6 +426,10 @@ export const addOrUpdateBudget = async (budget: StoredBudget) => {
         budget.remainingBalance,
       ]
     );
+
+    await db.runAsync("DELETE FROM budget_expenses WHERE budget_id = ?;", [
+      budgetId,
+    ]);
 
     // Insert budget expenses sequentially to avoid statement conflicts
     for (let index = 0; index < budget.bills.length; index++) {
@@ -446,7 +499,6 @@ export const getBudgets = async (): Promise<StoredBudget[]> => {
         [row.id]
       );
 
-      // TODO: change the amount used here or manual changes will be overwritten
       const bills = [];
       for (const expenseRow of expensesResult) {
         const match = expenseRow.expense_id.match(/^([a-f0-9-]{36})/);
@@ -462,27 +514,36 @@ export const getBudgets = async (): Promise<StoredBudget[]> => {
 
         bills.push({
           ...expenseRow,
+          amount: expenseRow.amount,
           expense: {
             ...expense,
+            amount: expenseRow.amount,
             date: expenseDate,
           },
           paid: expenseRow.paid === 1,
         });
       }
 
+      const billTotal = bills.reduce((sum, bill) => sum + bill.amount, 0);
+
       budgets.push({
         id: row.id,
         date: row.date,
-        income,
+        income: {
+          ...income,
+          amount: row.amount,
+          date: new Date(row.date),
+        },
         amount: row.amount,
         bills,
-        remainingBalance: row.remaining_balance,
+        remainingBalance: row.amount - billTotal,
       });
     }
 
     return budgets;
   } catch (e) {
     console.error(e);
+    return [];
   }
 };
 
@@ -727,7 +788,7 @@ export const updateExpenseAmountInDB = async (
  */
 export const updateExpenseOrderInDB = async (
   budgetId: string,
-  newOrder: ExpenseRow[]
+  newOrder: { id: string }[]
 ) => {
   if (!db) return;
 

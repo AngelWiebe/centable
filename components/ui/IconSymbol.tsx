@@ -17,12 +17,7 @@ const MAPPING = {
   "plus.circle.fill": "attach-money", // Incomes
   "chart.pie.fill": "pie-chart", // Pie chart
   "doc.text.fill": "insert-drive-file",
-} as Partial<
-  Record<
-    import("expo-symbols").SymbolViewProps["name"],
-    React.ComponentProps<typeof MaterialIcons>["name"]
-  >
->;
+} satisfies Record<string, React.ComponentProps<typeof MaterialIcons>["name"]>;
 
 export type IconSymbolName = keyof typeof MAPPING;
 

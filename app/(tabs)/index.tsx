@@ -4,7 +4,7 @@ import { ScrollView, StyleSheet } from "react-native";
 import { ThemedText } from "../../components/ThemedText";
 import { ThemedView } from "../../components/ThemedView";
 import { Colors } from "../../constants/Colors";
-import useBudgetStore from "../store/useBudgetStore";
+import useBudgetStore from "../../store/useBudgetStore";
 
 export default function TabOneScreen() {
   const { fetchAndCleanBudgets, settings } = useBudgetStore();
@@ -17,10 +17,13 @@ export default function TabOneScreen() {
   }, []);
 
   return (
-    <ScrollView style={{ backgroundColor: colorScheme.background }}>
+    <ScrollView
+      style={[styles.page, { backgroundColor: colorScheme.cardBackground }]}
+      contentContainerStyle={styles.container}
+    >
       <ThemedView
         style={[
-          styles.container,
+          styles.content,
           { backgroundColor: colorScheme.cardBackground },
         ]}
       >
@@ -85,10 +88,15 @@ export default function TabOneScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
+  page: {
     flex: 1,
+  },
+  container: {
+    flexGrow: 1,
+  },
+  content: {
+    flexGrow: 1,
     alignItems: "center",
-    justifyContent: "center",
     paddingHorizontal: 20,
     paddingTop: 20,
   },

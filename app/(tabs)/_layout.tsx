@@ -5,7 +5,7 @@ import { Image, Platform, TouchableOpacity } from "react-native";
 import { HapticTab } from "../../components/HapticTab";
 import TabBarBackground from "../../components/ui/TabBarBackground";
 import { Colors } from "../../constants/Colors";
-import useBudgetStore from "../store/useBudgetStore";
+import useBudgetStore from "../../store/useBudgetStore";
 
 export default function TabLayout() {
   const { settings } = useBudgetStore();
@@ -16,14 +16,19 @@ export default function TabLayout() {
     <Tabs
       screenOptions={{
         tabBarActiveTintColor: colorScheme.tabIconSelected,
+        tabBarInactiveTintColor: colorScheme.tabIconDefault,
         tabBarButton: HapticTab,
-        tabBarBackground: TabBarBackground,
-        tabBarStyle: Platform.select({
-          ios: {
-            position: "absolute",
-          },
-          default: {},
-        }),
+        tabBarBackground: Platform.OS === "ios" ? TabBarBackground : undefined,
+        tabBarStyle: {
+          backgroundColor: colorScheme.background,
+          borderTopColor: colorScheme.borderBottomColor,
+          ...Platform.select({
+            ios: {
+              position: "absolute",
+            },
+            default: {},
+          }),
+        },
         headerShown: true,
         headerTintColor: colorScheme.text,
         headerTitleAlign: "center",
@@ -77,7 +82,11 @@ export default function TabLayout() {
           title: "Expense Tracker",
           tabBarLabel: "Expenses",
           tabBarIcon: ({ color }) => (
-            <MaterialIcons name="remove-circle" size={28} color={color} />
+            <MaterialIcons
+              name="remove-circle"
+              size={28}
+              color={typeof color === "string" ? color : undefined}
+            />
           ),
         }}
       />
@@ -87,7 +96,11 @@ export default function TabLayout() {
           tabBarLabel: "Incomes",
           title: "Income Tracker",
           tabBarIcon: ({ color }) => (
-            <MaterialIcons name="add-circle" size={28} color={color} />
+            <MaterialIcons
+              name="add-circle"
+              size={28}
+              color={typeof color === "string" ? color : undefined}
+            />
           ),
         }}
       />
@@ -96,7 +109,11 @@ export default function TabLayout() {
         options={{
           title: "Budgets",
           tabBarIcon: ({ color }) => (
-            <MaterialIcons name="pie-chart" size={28} color={color} />
+            <MaterialIcons
+              name="pie-chart"
+              size={28}
+              color={typeof color === "string" ? color : undefined}
+            />
           ),
         }}
       />
@@ -105,7 +122,11 @@ export default function TabLayout() {
         options={{
           title: "Reports",
           tabBarIcon: ({ color }) => (
-            <MaterialIcons name="insert-chart" size={28} color={color} />
+            <MaterialIcons
+              name="insert-chart"
+              size={28}
+              color={typeof color === "string" ? color : undefined}
+            />
           ),
         }}
       />

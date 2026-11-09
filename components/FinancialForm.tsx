@@ -17,7 +17,7 @@ import { Picker } from "@react-native-picker/picker";
 import { KeyboardAwareScrollView } from "react-native-keyboard-aware-scroll-view";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import useBudgetStore from "../app/store/useBudgetStore";
+import useBudgetStore from "../store/useBudgetStore";
 import { Colors } from "../constants/Colors";
 import { FrequencyInterface } from "../types/frequency";
 
@@ -25,7 +25,7 @@ interface FinancialFormProps<T> {
   formData: any;
   setFormData: (data: Partial<T>) => void;
   isEditing: boolean;
-  handleSubmit: () => void;
+  handleSubmit: (data: Partial<T>) => void;
   showDatePicker: boolean;
   setShowDatePicker: (show: boolean) => void;
   resetForm: () => void;
@@ -126,27 +126,17 @@ const FinancialForm = <T extends { id: string; date: Date }>({
   };
 
   const validateAndSubmit = () => {
-    // Default to 1 month if frequency is not set and not one-time
-    const finalFrequency = isOneTime
+    const frequency = isOneTime
       ? undefined
-      : formData.frequency || { value: 1, unit: "months" };
+      : {
+          value:
+            formData.frequency?.unit === "semi-monthly"
+              ? 1
+              : formData.frequency?.value || 1,
+          unit: formData.frequency?.unit || "months",
+        };
 
-    if (isOneTime || (finalFrequency && finalFrequency.unit)) {
-      // Ensure frequency is set before submitting if not one-time
-      if (!isOneTime && finalFrequency) {
-        setFormData({
-          ...formData,
-          frequency: {
-            value: finalFrequency.value || 1,
-            unit: finalFrequency.unit || "months",
-          },
-        });
-      }
-      AccessibilityInfo.announceForAccessibility(
-        isEditing ? "Updating financial entry" : "Adding financial entry"
-      );
-      handleSubmit();
-    } else {
+    if (!isOneTime && !frequency?.unit) {
       Alert.alert(
         "Validation Error",
         "Either select 'One-Time Occurrence' or set a valid frequency."
@@ -154,7 +144,15 @@ const FinancialForm = <T extends { id: string; date: Date }>({
       AccessibilityInfo.announceForAccessibility(
         "Validation error: Either select 'One-Time Occurrence' or set a valid frequency."
       );
+      return;
     }
+
+    const payload = { ...formData, frequency };
+    setFormData(payload);
+    AccessibilityInfo.announceForAccessibility(
+      isEditing ? "Updating financial entry" : "Adding financial entry"
+    );
+    handleSubmit(payload);
   };
 
   return (

@@ -19,7 +19,7 @@ let IntentLauncher: any = null;
 
 try {
   // @ts-ignore - Native modules may not be available in all environments
-  FileSystem = require("expo-file-system");
+  FileSystem = require("expo-file-system/legacy");
   // @ts-ignore
   IntentLauncher = require("expo-intent-launcher");
 } catch (e) {
@@ -32,7 +32,8 @@ import { Colors } from "../../constants/Colors";
 import { currencySettings } from "../../types/settings";
 import { generateRandomColor } from "../../utils/generateRandomColor";
 import { getFirstAndLastDayOfMonth } from "../../utils/getFirstAndLast";
-import useBudgetStore from "../store/useBudgetStore";
+import { toLocalDay } from "../../utils/occurrenceDates";
+import useBudgetStore from "../../store/useBudgetStore";
 
 const screenWidth = Dimensions.get("window").width;
 
@@ -49,10 +50,12 @@ const Reports: React.FC = () => {
   const [filtersApplied, setFiltersApplied] = useState(false);
 
   const filteredBudgets = budgets.filter((budget) => {
-    const budgetDate = new Date(budget.date);
+    const budgetDay = toLocalDay(budget.date).getTime();
+    const startDay = startDate ? toLocalDay(startDate).getTime() : null;
+    const endDay = endDate ? toLocalDay(endDate).getTime() : null;
     return (
-      (!startDate || budgetDate >= startDate) &&
-      (!endDate || budgetDate <= endDate)
+      (startDay === null || budgetDay >= startDay) &&
+      (endDay === null || budgetDay <= endDay)
     );
   });
 

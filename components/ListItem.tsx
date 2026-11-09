@@ -7,7 +7,7 @@ import {
   View,
 } from "react-native";
 
-import useBudgetStore from "../app/store/useBudgetStore";
+import useBudgetStore from "../store/useBudgetStore";
 import { Colors } from "../constants/Colors";
 import { ExpenseInterface } from "../types/expense";
 import { IncomeInterface } from "../types/income";

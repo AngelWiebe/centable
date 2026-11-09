@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
 import { Colors } from "../../constants/Colors";
-import useBudgetStore from "../store/useBudgetStore";
+import useBudgetStore from "../../store/useBudgetStore";
 
 const currencies = ["USD", "EUR", "GBP", "JPY", "CAD"] as const;
 type CurrencyType = (typeof currencies)[number];
@@ -52,7 +52,9 @@ const Settings: React.FC = () => {
               styles.currencyButton,
               {
                 backgroundColor:
-                  currency === curr ? colorScheme.submitButton : "transparent",
+                  currency === curr
+                    ? colorScheme.submitButton
+                    : colorScheme.background,
                 borderColor:
                   currency === curr
                     ? colorScheme.submitButton

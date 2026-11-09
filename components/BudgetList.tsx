@@ -8,7 +8,7 @@ import {
 } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 
-import useBudgetStore from "../app/store/useBudgetStore";
+import useBudgetStore from "../store/useBudgetStore";
 import { Colors } from "../constants/Colors";
 import { StoredBudget } from "../types/budget";
 import BudgetItem from "./BudgetItem";

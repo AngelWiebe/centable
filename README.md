@@ -13,7 +13,7 @@ A personal budget management mobile app built with React Native and Expo. Track 
 
 ## Tech Stack
 
-- **Framework**: Expo SDK 52
+- **Framework**: Expo SDK 58
 - **Language**: TypeScript
 - **Navigation**: Expo Router (file-based routing)
 - **State Management**: Zustand
@@ -24,7 +24,7 @@ A personal budget management mobile app built with React Native and Expo. Track 
 
 ### Prerequisites
 
-- Node.js (v18 or later)
+- Node.js (v22.13 or later)
 - npm or yarn
 - Expo CLI (optional, but recommended)
 - iOS Simulator (for iOS development) or Android Emulator (for Android development)
@@ -84,7 +84,7 @@ centable/
 │   └── ...
 ├── database/              # SQLite database operations
 │   └── database.ts        # Database CRUD functions
-├── app/store/             # Zustand state management
+├── store/                 # Zustand state management
 │   └── useBudgetStore.ts  # Main app store
 ├── types/                 # TypeScript type definitions
 ├── utils/                 # Utility functions
@@ -118,7 +118,7 @@ The refresh button in the budget view recalculates budgets from scratch based on
 ### Available Scripts
 
 - `npm start` - Start Expo development server
-- `npm run android` - Run on Android emulator/device
+- `npm run android` - Start Expo and open the Android emulator or a connected device
 - `npm run ios` - Run on iOS simulator/device
 - `npm run web` - Run in web browser
 - `npm run lint` - Run ESLint

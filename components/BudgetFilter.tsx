@@ -1,16 +1,38 @@
 import { MaterialIcons } from "@expo/vector-icons";
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import {
   AccessibilityInfo,
   ActivityIndicator,
+  Modal,
+  Pressable,
   StyleSheet,
+  Text,
   TouchableOpacity,
   View,
 } from "react-native";
-import RNPickerSelect from "react-native-picker-select";
 
-import useBudgetStore from "../app/store/useBudgetStore";
+import useBudgetStore from "../store/useBudgetStore";
 import { Colors } from "../constants/Colors";
+import { VISIBLE_BUDGET_MONTHS } from "../utils/buildBudgets";
+
+function monthValue(month: number, year: number): string {
+  return `${year}-${month}`;
+}
+
+function parseMonthValue(
+  value: string | null
+): { month: number; year: number } | null {
+  if (!value) {
+    return null;
+  }
+  const [yearText, monthText] = value.split("-");
+  const year = Number(yearText);
+  const month = Number(monthText);
+  if (!year || !month) {
+    return null;
+  }
+  return { month, year };
+}
 
 const BudgetFilter: React.FC<{}> = ({}) => {
   const {
@@ -23,6 +45,7 @@ const BudgetFilter: React.FC<{}> = ({}) => {
   } = useBudgetStore();
 
   const [loading, setLoading] = useState(false);
+  const [monthListOpen, setMonthListOpen] = useState(false);
   const theme = settings?.theme ?? "dark";
   const colorScheme = Colors[theme];
 
@@ -30,30 +53,39 @@ const BudgetFilter: React.FC<{}> = ({}) => {
   const currentMonth = currentDate.getMonth() + 1;
   const currentYear = currentDate.getFullYear();
 
-  const options = Array.from({ length: 4 }, (_, i) => {
-    const date = new Date(currentYear, currentMonth - 2 + i);
-    return {
-      label: `${date.toLocaleString("default", {
-        month: "long",
-      })} ${date.getFullYear()}`,
-      value: { month: date.getMonth() + 1, year: date.getFullYear() },
-    };
-  });
+  const options = useMemo(
+    () =>
+      Array.from({ length: VISIBLE_BUDGET_MONTHS }, (_, i) => {
+        const date = new Date(currentYear, currentMonth - 2 + i);
+        const month = date.getMonth() + 1;
+        const year = date.getFullYear();
+        return {
+          label: `${date.toLocaleString("default", {
+            month: "long",
+          })} ${year}`,
+          value: monthValue(month, year),
+        };
+      }),
+    [currentMonth, currentYear]
+  );
+  const selectedValue = monthValue(selectedMonth, selectedYear);
 
-  const handleValueChange = (value: { month: number; year: number } | null) => {
-    if (value) {
-      setSelectedMonth(value.month);
-      setSelectedYear(value.year);
+  const selectedLabel =
+    options.find((option) => option.value === selectedValue)?.label ??
+    "Select a month";
+
+  const handleValueChange = (value: string | null) => {
+    const selected = parseMonthValue(value);
+    if (selected) {
+      setSelectedMonth(selected.month);
+      setSelectedYear(selected.year);
       AccessibilityInfo.announceForAccessibility(
         `Selected ${
-          options.find(
-            (option) =>
-              option.value.month === value.month &&
-              option.value.year === value.year
-          )?.label
+          options.find((option) => option.value === value)?.label
         }`
       );
     }
+    setMonthListOpen(false);
   };
 
   const handleRefresh = async () => {
@@ -70,37 +102,74 @@ const BudgetFilter: React.FC<{}> = ({}) => {
 
   return (
     <View style={styles.container}>
-      <View style={styles.pickerContainer}>
-        <RNPickerSelect
-          value={{ month: selectedMonth, year: selectedYear }}
-          onValueChange={handleValueChange}
-          items={options}
-          placeholder={{
-            label: "Select a month",
-            value: null,
-            color: colorScheme.submitButton,
-          }}
-          style={{
-            inputIOS: {
-              color: colorScheme.text,
-              backgroundColor: colorScheme.pickerBackground,
-              padding: 10,
-              borderRadius: 5,
-              fontSize: 16,
-            },
-            inputAndroid: {
-              color: colorScheme.text,
-              backgroundColor: colorScheme.pickerBackground,
-              padding: 10,
-              borderRadius: 5,
-              fontSize: 16,
-            },
-            placeholder: {
-              color: colorScheme.tint,
-            },
-          }}
-          useNativeAndroidPickerStyle={false}
-        />
+      <View
+        style={[
+          styles.pickerContainer,
+          { backgroundColor: colorScheme.pickerBackground },
+        ]}
+      >
+        <TouchableOpacity
+          style={styles.monthButton}
+          onPress={() => setMonthListOpen(true)}
+          accessibilityRole="button"
+          accessibilityLabel={`Selected month ${selectedLabel}`}
+        >
+          <Text style={[styles.monthLabel, { color: colorScheme.text }]}>
+            {selectedLabel}
+          </Text>
+          <MaterialIcons
+            name="arrow-drop-down"
+            size={24}
+            color={colorScheme.text}
+          />
+        </TouchableOpacity>
+        <Modal
+          visible={monthListOpen}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setMonthListOpen(false)}
+        >
+          <View style={styles.backdrop}>
+            <Pressable
+              style={StyleSheet.absoluteFill}
+              onPress={() => setMonthListOpen(false)}
+            />
+            <View
+              style={[
+                styles.monthList,
+                { backgroundColor: colorScheme.background },
+              ]}
+            >
+              {options.map((option) => {
+                const selected = option.value === selectedValue;
+                return (
+                  <TouchableOpacity
+                    key={option.value}
+                    onPress={() => handleValueChange(option.value)}
+                    style={[
+                      styles.monthOption,
+                      selected && {
+                        backgroundColor: colorScheme.submitButton,
+                      },
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected }}
+                  >
+                    <Text
+                      style={[
+                        styles.monthOptionLabel,
+                        { color: selected ? "#FFFFFF" : colorScheme.text },
+                        selected && styles.monthOptionLabelSelected,
+                      ]}
+                    >
+                      {option.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+        </Modal>
       </View>
       <TouchableOpacity
         onPress={handleRefresh}
@@ -130,6 +199,39 @@ const styles = StyleSheet.create({
   pickerContainer: {
     flex: 1,
     marginRight: 10,
+    borderRadius: 5,
+    overflow: "hidden",
+    justifyContent: "center",
+  },
+  monthButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+  },
+  monthLabel: {
+    fontSize: 16,
+  },
+  backdrop: {
+    flex: 1,
+    justifyContent: "center",
+    paddingHorizontal: 24,
+    backgroundColor: "rgba(0, 0, 0, 0.45)",
+  },
+  monthList: {
+    borderRadius: 8,
+    overflow: "hidden",
+  },
+  monthOption: {
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  monthOptionLabel: {
+    fontSize: 16,
+  },
+  monthOptionLabelSelected: {
+    fontWeight: "700",
   },
   refreshButton: {
     padding: 10,

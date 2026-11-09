@@ -1,7 +1,7 @@
 import React from "react";
 import { StyleSheet, View } from "react-native";
 
-import useBudgetStore from "../../app/store/useBudgetStore";
+import useBudgetStore from "../../store/useBudgetStore";
 import BudgetFilter from "../../components/BudgetFilter";
 import BudgetList from "../../components/BudgetList";
 import { Colors } from "../../constants/Colors";

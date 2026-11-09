@@ -1,11 +1,19 @@
 import React, { useCallback, useMemo, useState } from "react";
-import { Alert, Button, FlatList, StyleSheet, View } from "react-native";
+import {
+  Alert,
+  FlatList,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
 
-import useBudgetStore from "../../app/store/useBudgetStore";
+import useBudgetStore from "../../store/useBudgetStore";
 import FinancialForm from "../../components/FinancialForm";
 import ListItem from "../../components/ListItem";
 import { Colors } from "../../constants/Colors";
 import { IncomeInterface } from "../../types/income";
+import { normalizeFrequency } from "../../utils/normalizeFrequency";
 
 const Incomes: React.FC = React.memo(() => {
   const { incomes, addOrUpdateIncome, deleteIncome, settings } =
@@ -17,34 +25,28 @@ const Incomes: React.FC = React.memo(() => {
   const [showForm, setShowForm] = useState<boolean>(false);
   const [showDatePicker, setShowDatePicker] = useState<boolean>(false);
 
-  const handleAddOrUpdateIncome = useCallback(async () => {
-    if (
-      !incomeForm.name ||
-      !incomeForm.date ||
-      incomeForm.amount === undefined
-    ) {
-      Alert.alert("Error", "Please fill in the required fields.");
-      return;
-    }
-
-    let frequency = undefined;
-    if (incomeForm.frequency?.value && incomeForm.frequency?.unit) {
-      frequency = {
-        value: incomeForm.frequency?.value,
-        unit: incomeForm.frequency?.unit,
-      };
-    }
-
-    await addOrUpdateIncome({ ...incomeForm, frequency });
-
-    resetForm();
-  }, [incomeForm, isEditing, addOrUpdateIncome]);
-
   const resetForm = useCallback(() => {
     setIncomeForm({});
     setIsEditing(false);
     setShowForm(false);
   }, []);
+
+  const handleAddOrUpdateIncome = useCallback(
+    async (data: Partial<IncomeInterface>) => {
+      if (!data.name || !data.date || data.amount === undefined) {
+        Alert.alert("Error", "Please fill in the required fields.");
+        return;
+      }
+
+      await addOrUpdateIncome({
+        ...data,
+        frequency: normalizeFrequency(data.frequency),
+      });
+
+      resetForm();
+    },
+    [addOrUpdateIncome, resetForm]
+  );
 
   const handleDateChange = useCallback((event: any, date?: Date) => {
     if (event.type === "set" && date) {
@@ -112,13 +114,18 @@ const Incomes: React.FC = React.memo(() => {
         />
       ) : (
         <>
-          <View style={styles.buttonContainer}>
-            <Button
-              title="Add Income"
-              onPress={() => setShowForm(true)}
-              accessibilityLabel="Add a new income"
-            />
-          </View>
+          <TouchableOpacity
+            style={[
+              styles.addButton,
+              { backgroundColor: colorScheme.submitButton },
+            ]}
+            onPress={() => setShowForm(true)}
+            accessibilityLabel="Add a new income"
+          >
+            <Text style={[styles.addButtonText, { color: colorScheme.buttonText }]}>
+              Add Income
+            </Text>
+          </TouchableOpacity>
 
           <FlatList
             data={memoizedIncomes}
@@ -139,10 +146,15 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: 10,
   },
-  buttonContainer: {
+  addButton: {
     marginBottom: 5,
     borderRadius: 8,
-    overflow: "hidden",
+    paddingVertical: 12,
+    alignItems: "center",
+  },
+  addButtonText: {
+    fontSize: 16,
+    fontWeight: "bold",
   },
   listContent: {
     marginTop: 10,

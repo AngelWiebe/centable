@@ -6,12 +6,13 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  type TextInputInstance,
   TouchableOpacity,
   View,
 } from "react-native";
 import DraggableFlatList from "react-native-draggable-flatlist";
 
-import useBudgetStore from "../app/store/useBudgetStore";
+import useBudgetStore from "../store/useBudgetStore";
 import { Colors } from "../constants/Colors";
 import { StoredBudget } from "../types/budget";
 import { currencySettings } from "../types/settings";
@@ -36,7 +37,7 @@ const BudgetItem: React.FC<BudgetItemProps> = ({ budget }) => {
   const [editingIncome, setEditingIncome] = useState(false);
   const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
   const [editedAmount, setEditedAmount] = useState<string | null>(null);
-  const incomeInputRef = useRef<TextInput>(null);
+  const incomeInputRef = useRef<TextInputInstance>(null);
 
   const bills = useMemo(() => budget.bills, [budget.bills]);
 
@@ -200,7 +201,7 @@ const BudgetItem: React.FC<BudgetItemProps> = ({ budget }) => {
                   color: colorScheme.text,
                 },
               ]}
-              placeholderTextColor={colorScheme.buttonText}
+              placeholderTextColor={colorScheme.buttonBorder}
               keyboardType="decimal-pad"
               value={editedAmount || ""}
               onChangeText={(text) =>

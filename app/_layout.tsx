@@ -11,7 +11,7 @@ import { useEffect } from "react";
 import "react-native-reanimated";
 
 import { Colors } from "../constants/Colors";
-import useBudgetStore from "./store/useBudgetStore";
+import useBudgetStore from "../store/useBudgetStore";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -53,7 +53,6 @@ export default function RootLayout() {
         }}
       >
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="+not-found" />
       </Stack>
       {/* <StatusBar style="auto" /> */}
       <StatusBar

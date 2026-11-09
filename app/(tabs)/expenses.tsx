@@ -10,21 +10,22 @@ import React, {
 } from "react";
 import {
   Alert,
-  Button,
   FlatList,
   KeyboardAvoidingView,
   Platform,
   StyleSheet,
   Text,
   TextInput,
+  TouchableOpacity,
   View,
 } from "react-native";
 
-import useBudgetStore from "../../app/store/useBudgetStore";
+import useBudgetStore from "../../store/useBudgetStore";
 import FinancialForm from "../../components/FinancialForm";
 import ListItem from "../../components/ListItem";
 import { Colors } from "../../constants/Colors";
 import { ExpenseInterface } from "../../types/expense";
+import { normalizeFrequency } from "../../utils/normalizeFrequency";
 
 const Expenses: React.FC = React.memo(() => {
   const { expenses, settings } = useBudgetStore();
@@ -65,33 +66,27 @@ const Expenses: React.FC = React.memo(() => {
     setDebouncedSearchTerm(text);
   }, 300);
 
-  const handleAddOrUpdateExpense = useCallback(() => {
-    if (
-      !expenseForm.name ||
-      !expenseForm.date ||
-      expenseForm.amount === undefined
-    ) {
-      Alert.alert("Error", "Please fill in the required fields.");
-      return;
-    }
-
-    let frequency = undefined;
-    if (expenseForm.frequency?.value && expenseForm.frequency?.unit) {
-      frequency = {
-        value: expenseForm.frequency?.value,
-        unit: expenseForm.frequency?.unit,
-      };
-    }
-
-    addOrUpdateExpense(expenseForm);
-    resetForm();
-  }, [expenseForm, isEditing, addOrUpdateExpense]);
-
   const resetForm = useCallback(() => {
     setExpenseForm({});
     setIsEditing(false);
     setShowForm(false);
   }, []);
+
+  const handleAddOrUpdateExpense = useCallback(
+    async (data: Partial<ExpenseInterface>) => {
+      if (!data.name || !data.date || data.amount === undefined) {
+        Alert.alert("Error", "Please fill in the required fields.");
+        return;
+      }
+
+      await addOrUpdateExpense({
+        ...data,
+        frequency: normalizeFrequency(data.frequency),
+      });
+      resetForm();
+    },
+    [addOrUpdateExpense, resetForm]
+  );
 
   const handleDateChange = useCallback((event: any, date?: Date) => {
     if (event.type === "set" && date) {
@@ -162,7 +157,14 @@ const Expenses: React.FC = React.memo(() => {
         <Text style={[styles.errorText, { color: colorScheme.text }]}>
           {error}
         </Text>
-        <Button title="Retry" onPress={memoizedLoadExpenses} />
+        <TouchableOpacity
+          style={[styles.addButton, { backgroundColor: colorScheme.submitButton }]}
+          onPress={memoizedLoadExpenses}
+        >
+          <Text style={[styles.addButtonText, { color: colorScheme.buttonText }]}>
+            Retry
+          </Text>
+        </TouchableOpacity>
       </View>
     );
   }
@@ -188,13 +190,18 @@ const Expenses: React.FC = React.memo(() => {
         />
       ) : (
         <>
-          <View style={styles.buttonContainer}>
-            <Button
-              title="Add Expense"
-              onPress={() => setShowForm(true)}
-              accessibilityLabel="Add a new expense"
-            />
-          </View>
+          <TouchableOpacity
+            style={[
+              styles.addButton,
+              { backgroundColor: colorScheme.submitButton },
+            ]}
+            onPress={() => setShowForm(true)}
+            accessibilityLabel="Add a new expense"
+          >
+            <Text style={[styles.addButtonText, { color: colorScheme.buttonText }]}>
+              Add Expense
+            </Text>
+          </TouchableOpacity>
 
           <View style={styles.searchFilterContainer}>
             <View style={styles.searchInputWrapper}>
@@ -264,8 +271,15 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: 10,
   },
-  buttonContainer: {
+  addButton: {
     marginBottom: 10,
+    borderRadius: 8,
+    paddingVertical: 12,
+    alignItems: "center",
+  },
+  addButtonText: {
+    fontSize: 16,
+    fontWeight: "bold",
   },
   filterContainer: {
     flexDirection: "row",
