@@ -1,17 +1,15 @@
-import React, { useEffect, useMemo } from "react";
+import React, { useEffect, useMemo, useRef } from "react";
+import { AccessibilityInfo, StyleSheet, Text, View } from "react-native";
 import {
-  AccessibilityInfo,
   FlatList,
-  StyleSheet,
-  Text,
-  View,
-} from "react-native";
-import { GestureHandlerRootView } from "react-native-gesture-handler";
+  GestureHandlerRootView,
+} from "react-native-gesture-handler";
 
 import useBudgetStore from "../store/useBudgetStore";
 import { Colors } from "../constants/Colors";
 import { StoredBudget } from "../types/budget";
 import BudgetItem from "./BudgetItem";
+import { BudgetScrollContext } from "./BudgetScrollContext";
 
 const BudgetList: React.FC<{}> = ({}) => {
   const { budgets, selectedMonth, selectedYear, settings } = useBudgetStore();
@@ -44,6 +42,7 @@ const BudgetList: React.FC<{}> = ({}) => {
     }
   }, [filteredBudgets]);
 
+  const listRef = useRef(null);
   const renderItem = ({ item }: { item: StoredBudget }) => (
     <BudgetItem budget={item} />
   );
@@ -68,16 +67,19 @@ const BudgetList: React.FC<{}> = ({}) => {
 
   return (
     <GestureHandlerRootView style={styles.container}>
-      <FlatList
-        contentContainerStyle={{ flexGrow: 1 }}
-        style={{ flex: 1 }}
-        data={filteredBudgets}
-        renderItem={renderItem}
-        keyExtractor={(item) => item.id}
-        accessible={true}
-        accessibilityRole="list"
-        accessibilityLabel="Filtered budget list"
-      />
+      <BudgetScrollContext.Provider value={listRef}>
+        <FlatList
+          ref={listRef}
+          contentContainerStyle={{ flexGrow: 1 }}
+          style={{ flex: 1 }}
+          data={filteredBudgets}
+          renderItem={renderItem}
+          keyExtractor={(item) => item.id}
+          accessible={true}
+          accessibilityRole="list"
+          accessibilityLabel="Filtered budget list"
+        />
+      </BudgetScrollContext.Provider>
     </GestureHandlerRootView>
   );
 };

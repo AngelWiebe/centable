@@ -1,5 +1,13 @@
 import { MaterialIcons } from "@expo/vector-icons";
-import React, { useMemo, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   AccessibilityInfo,
   Alert,
@@ -10,12 +18,189 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import DraggableFlatList from "react-native-draggable-flatlist";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import Animated, {
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from "react-native-reanimated";
 
 import useBudgetStore from "../store/useBudgetStore";
 import { Colors } from "../constants/Colors";
 import { StoredBudget } from "../types/budget";
 import { currencySettings } from "../types/settings";
+import { BudgetScrollContext } from "./BudgetScrollContext";
+
+type BudgetBill = StoredBudget["bills"][number];
+type SharedNumber = ReturnType<typeof useSharedValue<number>>;
+
+const ROW_GAP = 16;
+
+function DraggableExpenseRow({
+  index,
+  count,
+  dragY,
+  activeIndex,
+  activeHeight,
+  settled,
+  onReorder,
+  cardColor,
+  dragColor,
+  accentColor,
+  enabled,
+  children,
+}: {
+  index: number;
+  count: number;
+  dragY: SharedNumber;
+  activeIndex: SharedNumber;
+  activeHeight: SharedNumber;
+  settled: SharedNumber;
+  onReorder: (from: number, to: number) => void;
+  cardColor: string;
+  dragColor: string;
+  accentColor: string;
+  enabled: boolean;
+  children: React.ReactNode;
+}) {
+  const scrollRef = useContext(BudgetScrollContext);
+  const held = useSharedValue(0);
+  const origin = useSharedValue(-1);
+  const lifted = useSharedValue(0);
+  const slot = useSharedValue(index);
+  const shift = useSharedValue(0);
+  const indexSV = useSharedValue(index);
+  // Update before paint so the release offset shrinks by the same amount
+  // the row's layout slot moves.
+  useLayoutEffect(() => {
+    indexSV.value = index;
+  }, [index, indexSV]);
+
+  const gesture = useMemo(() => {
+    const pan = Gesture.Pan()
+      .enabled(enabled)
+      .activateAfterLongPress(220)
+      .shouldCancelWhenOutside(false)
+      .onStart(() => {
+        dragY.value = 0;
+        activeIndex.value = index;
+        lifted.value = 1;
+      })
+      .onUpdate((event) => {
+        dragY.value = event.translationY;
+      })
+      .onEnd((event) => {
+        const step = activeHeight.value + ROW_GAP;
+        const from = index;
+        if (step <= ROW_GAP) {
+          dragY.value = 0;
+          activeIndex.value = -1;
+          lifted.value = 0;
+          return;
+        }
+        const to = Math.max(
+          0,
+          Math.min(count - 1, from + Math.round(event.translationY / step))
+        );
+        const delta = (to - from) * step;
+        dragY.value = withTiming(delta, { duration: 140 }, (finished) => {
+          if (!finished) return;
+          if (from === to) {
+            activeIndex.value = -1;
+            lifted.value = 0;
+            return;
+          }
+          held.value = delta;
+          settled.value = 1;
+          runOnJS(onReorder)(from, to);
+        });
+      });
+
+    if (scrollRef) {
+      pan.blocksExternalGesture(scrollRef as never);
+    }
+    return pan;
+  }, [
+    activeHeight,
+    activeIndex,
+    count,
+    dragY,
+    enabled,
+    held,
+    index,
+    lifted,
+    onReorder,
+    scrollRef,
+    settled,
+  ]);
+
+  const animatedStyle = useAnimatedStyle(() => {
+    const step = activeHeight.value + ROW_GAP;
+    const from = activeIndex.value;
+    const current = indexSV.value;
+    const isActive = lifted.value === 1;
+    let translateY = 0;
+
+    if (from < 0 && !settled.value) {
+      origin.value = -1;
+      slot.value = current;
+      lifted.value = 0;
+    } else if (settled.value && origin.value >= 0 && step > ROW_GAP) {
+      translateY = held.value - (current - origin.value) * step;
+    } else if (from >= 0 && step > ROW_GAP) {
+      if (origin.value < 0) origin.value = current;
+      const target = Math.max(
+        0,
+        Math.min(count - 1, from + Math.round(dragY.value / step))
+      );
+      let nextSlot = current;
+      if (current === from) {
+        translateY = dragY.value;
+      } else if (from < target && current > from && current <= target) {
+        nextSlot = current - 1;
+        translateY = -step;
+      } else if (from > target && current < from && current >= target) {
+        nextSlot = current + 1;
+        translateY = step;
+      }
+      held.value = translateY;
+      if (current === from) {
+        slot.value = nextSlot;
+        shift.value = translateY;
+      } else if (slot.value !== nextSlot) {
+        slot.value = nextSlot;
+        shift.value = withTiming(translateY, { duration: 150 });
+      }
+      translateY = shift.value;
+    }
+
+    return {
+      transform: [{ translateY }],
+      zIndex: isActive ? 20 : 0,
+      elevation: isActive ? 6 : 0,
+      backgroundColor: isActive ? dragColor : cardColor,
+      borderColor: isActive ? accentColor : "transparent",
+      borderWidth: 2,
+      borderRadius: 8,
+      marginBottom: current === count - 1 ? 0 : ROW_GAP,
+    };
+  });
+
+  return (
+    <GestureDetector gesture={gesture}>
+      <Animated.View
+        style={animatedStyle}
+        onLayout={(event) => {
+          const height = event.nativeEvent.layout.height;
+          if (height > 0) activeHeight.value = height;
+        }}
+      >
+        {children}
+      </Animated.View>
+    </GestureDetector>
+  );
+}
 
 interface BudgetItemProps {
   budget: StoredBudget;
@@ -103,10 +288,33 @@ const BudgetItem: React.FC<BudgetItemProps> = ({ budget }) => {
     );
   };
 
-  const handleDragEnd = ({ data }: { data: any[] }) => {
-    updateExpenseOrder(budget.id, data);
-    announceChange("Expenses reordered successfully.");
-  };
+  const reorderExpenses = useCallback(
+    (from: number, to: number) => {
+      if (from === to) return;
+      const next = [...bills];
+      const [moved] = next.splice(from, 1);
+      if (!moved) return;
+      next.splice(to, 0, moved);
+      updateExpenseOrder(budget.id, next);
+      announceChange("Expenses reordered successfully.");
+    },
+    [bills, budget.id, updateExpenseOrder]
+  );
+
+  const dragY = useSharedValue(0);
+  const activeIndex = useSharedValue(-1);
+  const activeHeight = useSharedValue(0);
+  const settled = useSharedValue(0);
+
+  useEffect(() => {
+    if (!settled.value) return;
+    const frame = requestAnimationFrame(() => {
+      settled.value = 0;
+      activeIndex.value = -1;
+      dragY.value = 0;
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [activeIndex, bills, dragY, settled]);
 
   const validateDecimalInput = (text: string): string => {
     const sanitizedText = text.replace(/[^0-9.]/g, "");
@@ -118,15 +326,7 @@ const BudgetItem: React.FC<BudgetItemProps> = ({ budget }) => {
     return sanitizedText;
   };
 
-  const renderItem = ({
-    item,
-    drag,
-    isActive,
-  }: {
-    item: { id: string; expense: any; paid: boolean; amount: number };
-    drag: () => void;
-    isActive: boolean;
-  }) => {
+  const renderBill = (item: BudgetBill, index: number) => {
     const { id: rowId, expense, paid, amount } = item;
 
     const togglePaid = () => {
@@ -139,19 +339,28 @@ const BudgetItem: React.FC<BudgetItemProps> = ({ budget }) => {
     };
 
     return (
-      <View
+      <DraggableExpenseRow
         key={rowId}
-        style={[
-          styles.expenseRow,
-          isActive && styles.draggingRow,
-          { backgroundColor: colorScheme.cardBackground },
-        ]}
-        accessible={true}
-        accessibilityLabel={`Expense item: ${
-          expense.name
-        }, amount ${expense.amount.toFixed(2)}, ${paid ? "paid" : "not paid"}`}
-        accessibilityRole="adjustable"
+        index={index}
+        count={bills.length}
+        dragY={dragY}
+        activeIndex={activeIndex}
+        activeHeight={activeHeight}
+        onReorder={reorderExpenses}
+        cardColor={colorScheme.cardBackground}
+        dragColor={colorScheme.draggingRow}
+        accentColor={colorScheme.tabIconSelected}
+        enabled={editingExpenseId !== rowId}
+        settled={settled}
       >
+        <View
+          style={styles.expenseRow}
+          accessible={true}
+          accessibilityLabel={`Expense item: ${
+            expense.name
+          }, amount ${expense.amount.toFixed(2)}, ${paid ? "paid" : "not paid"}`}
+          accessibilityRole="adjustable"
+        >
         <View style={styles.deleteWrapper}>
           <TouchableOpacity
             onPress={() => confirmDelete(rowId, expense.name)}
@@ -161,8 +370,7 @@ const BudgetItem: React.FC<BudgetItemProps> = ({ budget }) => {
             <MaterialIcons name="delete" size={24} color={colorScheme.icon} />
           </TouchableOpacity>
         </View>
-        <TouchableOpacity
-          onLongPress={drag}
+        <View
           style={styles.expenseItem}
           accessible={true}
           accessibilityLabel={`Drag handle for ${expense.name}`}
@@ -242,8 +450,9 @@ const BudgetItem: React.FC<BudgetItemProps> = ({ budget }) => {
               style={styles.paidIcon}
             />
           </TouchableOpacity>
-        </TouchableOpacity>
-      </View>
+        </View>
+        </View>
+      </DraggableExpenseRow>
     );
   };
 
@@ -303,12 +512,9 @@ const BudgetItem: React.FC<BudgetItemProps> = ({ budget }) => {
         )}
       </View>
 
-      <DraggableFlatList
-        data={bills}
-        keyExtractor={(item) => item.id}
-        onDragEnd={handleDragEnd}
-        renderItem={renderItem}
-      />
+      <View style={styles.expenseList}>
+        {bills.map((item, index) => renderBill(item, index))}
+      </View>
 
       <View style={styles.summaryRow}>
         <Text style={[styles.summaryLabel, { color: colorScheme.text }]}>
@@ -379,11 +585,10 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     padding: 10,
     paddingLeft: 0,
-    marginBottom: 8,
     borderRadius: 8,
   },
-  draggingRow: {
-    backgroundColor: "#4A90E2",
+  expenseList: {
+    overflow: "visible",
   },
   expenseItem: {
     flexDirection: "row",

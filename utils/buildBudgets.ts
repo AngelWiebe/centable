@@ -79,6 +79,7 @@ export function buildBudgets(
   dismissedExpenseKeys: Iterable<string> = []
 ): StoredBudget[] {
   const paidByAssignment = new Map<string, boolean>();
+  const sortOrderByBill = new Map<string, number>();
   const incomeAmountOverrides = new Map<string, number>();
   const expenseAmountOverrides = new Map<string, number>();
   const incomeAmounts = new Map(incomes.map((income) => [income.id, income.amount]));
@@ -105,6 +106,9 @@ export function buildBudgets(
     }
 
     for (const bill of budget.bills ?? []) {
+      if (typeof bill.sort_order === "number") {
+        sortOrderByBill.set(bill.id, bill.sort_order);
+      }
       const expenseId = bill.expense?.id;
       if (!expenseId) continue;
       paidByAssignment.set(
@@ -205,11 +209,22 @@ export function buildBudgets(
   }
 
   for (const budget of budgets) {
-    budget.bills.sort(
-      (a, b) =>
+    const hasCustomOrder = budget.bills.some((bill) =>
+      sortOrderByBill.has(bill.id)
+    );
+    budget.bills.sort((a, b) => {
+      if (hasCustomOrder) {
+        const aOrder = sortOrderByBill.get(a.id);
+        const bOrder = sortOrderByBill.get(b.id);
+        if (aOrder !== undefined && bOrder !== undefined) return aOrder - bOrder;
+        if (aOrder !== undefined) return -1;
+        if (bOrder !== undefined) return 1;
+      }
+      return (
         toLocalDay(a.expense.date).getTime() -
         toLocalDay(b.expense.date).getTime()
-    );
+      );
+    });
     budget.bills.forEach((bill, index) => {
       bill.sort_order = index;
     });
