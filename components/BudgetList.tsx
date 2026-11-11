@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { AccessibilityInfo, StyleSheet, Text, View } from "react-native";
 import {
   FlatList,
@@ -43,6 +43,11 @@ const BudgetList: React.FC<{}> = ({}) => {
   }, [filteredBudgets]);
 
   const listRef = useRef(null);
+  const [scrollEnabled, setScrollEnabled] = useState(true);
+  const scroll = useMemo(
+    () => ({ listRef, setScrollEnabled }),
+    []
+  );
   const renderItem = ({ item }: { item: StoredBudget }) => (
     <BudgetItem budget={item} />
   );
@@ -67,9 +72,10 @@ const BudgetList: React.FC<{}> = ({}) => {
 
   return (
     <GestureHandlerRootView style={styles.container}>
-      <BudgetScrollContext.Provider value={listRef}>
+      <BudgetScrollContext.Provider value={scroll}>
         <FlatList
           ref={listRef}
+          scrollEnabled={scrollEnabled}
           contentContainerStyle={{ flexGrow: 1 }}
           style={{ flex: 1 }}
           data={filteredBudgets}

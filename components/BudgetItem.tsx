@@ -64,12 +64,13 @@ function DraggableExpenseRow({
   enabled: boolean;
   children: React.ReactNode;
 }) {
-  const scrollRef = useContext(BudgetScrollContext);
+  const scroll = useContext(BudgetScrollContext);
   const held = useSharedValue(0);
   const origin = useSharedValue(-1);
   const lifted = useSharedValue(0);
   const slot = useSharedValue(index);
   const shift = useSharedValue(0);
+  const grabY = useSharedValue(0);
   const indexSV = useSharedValue(index);
   // Update before paint so the release offset shrinks by the same amount
   // the row's layout slot moves.
@@ -78,21 +79,27 @@ function DraggableExpenseRow({
   }, [index, indexSV]);
 
   const gesture = useMemo(() => {
+    const setScrollEnabled = scroll?.setScrollEnabled;
     const pan = Gesture.Pan()
       .enabled(enabled)
       .activateAfterLongPress(220)
       .shouldCancelWhenOutside(false)
-      .onStart(() => {
+      .onStart((event) => {
+        // Translation includes movement from the initial touch. Keep the row
+        // where it was when the long press actually grabbed it.
+        grabY.value = event.translationY;
         dragY.value = 0;
         activeIndex.value = index;
         lifted.value = 1;
+        if (setScrollEnabled) runOnJS(setScrollEnabled)(false);
       })
       .onUpdate((event) => {
-        dragY.value = event.translationY;
+        dragY.value = event.translationY - grabY.value;
       })
       .onEnd((event) => {
         const step = activeHeight.value + ROW_GAP;
         const from = index;
+        const translation = event.translationY - grabY.value;
         if (step <= ROW_GAP) {
           dragY.value = 0;
           activeIndex.value = -1;
@@ -101,7 +108,7 @@ function DraggableExpenseRow({
         }
         const to = Math.max(
           0,
-          Math.min(count - 1, from + Math.round(event.translationY / step))
+          Math.min(count - 1, from + Math.round(translation / step))
         );
         const delta = (to - from) * step;
         dragY.value = withTiming(delta, { duration: 140 }, (finished) => {
@@ -115,10 +122,19 @@ function DraggableExpenseRow({
           settled.value = 1;
           runOnJS(onReorder)(from, to);
         });
+      })
+      .onFinalize((_event, success) => {
+        if (setScrollEnabled) runOnJS(setScrollEnabled)(true);
+        if (success || activeIndex.value !== index) return;
+        dragY.value = withTiming(0, { duration: 140 }, (finished) => {
+          if (!finished) return;
+          activeIndex.value = -1;
+          lifted.value = 0;
+        });
       });
 
-    if (scrollRef) {
-      pan.blocksExternalGesture(scrollRef as never);
+    if (scroll?.listRef) {
+      pan.blocksExternalGesture(scroll.listRef as never);
     }
     return pan;
   }, [
@@ -127,11 +143,12 @@ function DraggableExpenseRow({
     count,
     dragY,
     enabled,
+    grabY,
     held,
     index,
     lifted,
     onReorder,
-    scrollRef,
+    scroll,
     settled,
   ]);
 
@@ -145,6 +162,7 @@ function DraggableExpenseRow({
     if (from < 0 && !settled.value) {
       origin.value = -1;
       slot.value = current;
+      shift.value = 0;
       lifted.value = 0;
     } else if (settled.value && origin.value >= 0 && step > ROW_GAP) {
       translateY = held.value - (current - origin.value) * step;
@@ -154,43 +172,44 @@ function DraggableExpenseRow({
         0,
         Math.min(count - 1, from + Math.round(dragY.value / step))
       );
-      let nextSlot = current;
       if (current === from) {
         translateY = dragY.value;
-      } else if (from < target && current > from && current <= target) {
-        nextSlot = current - 1;
-        translateY = -step;
-      } else if (from > target && current < from && current >= target) {
-        nextSlot = current + 1;
-        translateY = step;
+        held.value = translateY;
+      } else {
+        let nextSlot = current;
+        if (from < target && current > from && current <= target) {
+          nextSlot = current - 1;
+          translateY = -step;
+        } else if (from > target && current < from && current >= target) {
+          nextSlot = current + 1;
+          translateY = step;
+        }
+        held.value = translateY;
+        if (slot.value !== nextSlot) {
+          slot.value = nextSlot;
+          shift.value = withTiming(translateY, { duration: 150 });
+        }
+        translateY = shift.value;
       }
-      held.value = translateY;
-      if (current === from) {
-        slot.value = nextSlot;
-        shift.value = translateY;
-      } else if (slot.value !== nextSlot) {
-        slot.value = nextSlot;
-        shift.value = withTiming(translateY, { duration: 150 });
-      }
-      translateY = shift.value;
     }
 
     return {
       transform: [{ translateY }],
       zIndex: isActive ? 20 : 0,
-      elevation: isActive ? 6 : 0,
       backgroundColor: isActive ? dragColor : cardColor,
       borderColor: isActive ? accentColor : "transparent",
       borderWidth: 2,
       borderRadius: 8,
-      marginBottom: current === count - 1 ? 0 : ROW_GAP,
     };
   });
 
   return (
     <GestureDetector gesture={gesture}>
       <Animated.View
-        style={animatedStyle}
+        style={[
+          { marginBottom: index === count - 1 ? 0 : ROW_GAP },
+          animatedStyle,
+        ]}
         onLayout={(event) => {
           const height = event.nativeEvent.layout.height;
           if (height > 0) activeHeight.value = height;
