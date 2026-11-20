@@ -1,11 +1,16 @@
+import { migrateDatabase } from "./migrations";
+import { FinancialEntry } from "../types/financialEntry";
+import { forecastChanges } from "../utils/forecastChanges";
+import { Platform } from "react-native";
+import { remainingBalance as calculateRemainingBalance } from "../utils/money";
 import { openDatabaseAsync, SQLiteDatabase } from "expo-sqlite";
 import uuid from "react-native-uuid";
 
-import { StoredBudget } from "../types/budget";
+import { BudgetForecast, StoredBudget, UnfundedExpense } from "../types/budget";
 import { ExpenseInterface } from "../types/expense";
 import { FrequencyInterface } from "../types/frequency";
 import { IncomeInterface } from "../types/income";
-import { expenseOccurrenceKey } from "../utils/buildBudgets";
+import { expenseOccurrenceKey, isManualBudgetExpense } from "../utils/buildBudgets";
 
 let db: SQLiteDatabase | null = null;
 let ready: Promise<void> | null = null;
@@ -24,6 +29,7 @@ type BudgetRow = {
   date: string;
   income_id: string;
   remaining_balance: number;
+  amount_override?: number;
 };
 
 type ExpenseRow = {
@@ -33,29 +39,9 @@ type ExpenseRow = {
   id: string;
   sort_order: number;
   expense_date?: string;
-};
-
-export const resetTables = async () => {
-  if (!db) return;
-
-  try {
-    await db.execAsync(`
-      DROP TABLE IF EXISTS incomes;
-      DROP TABLE IF EXISTS expenses;
-      DROP TABLE IF EXISTS budgets;
-      DROP TABLE IF EXISTS budget_expenses;
-      DROP TABLE IF EXISTS dismissed_budget_expenses;
-      DROP TABLE IF EXISTS settings;
-    `);
-
-    // Recreate tables
-    ready = null;
-    db = null;
-    await setupDatabase();
-    console.log("✅ Tables recreated successfully.");
-  } catch (error) {
-    console.error("❌ Error resetting tables:", error);
-  }
+  assignment_override?: number;
+  amount_override?: number;
+  name?: string | null;
 };
 
 /**
@@ -74,119 +60,35 @@ export const setupDatabase = async () => {
 
 const openAndMigrateDatabase = async () => {
   db = await openDatabaseAsync("budget.db");
-
-  await db.execAsync(`
-    CREATE TABLE IF NOT EXISTS incomes (
-      id TEXT PRIMARY KEY NOT NULL,
-      name TEXT NOT NULL,
-      date TEXT NOT NULL,
-      amount REAL NOT NULL,
-      frequency TEXT
-    );
-  `);
-
-  await db.execAsync(`
-    CREATE TABLE IF NOT EXISTS expenses (
-      id TEXT PRIMARY KEY NOT NULL,
-      name TEXT NOT NULL,
-      date TEXT NOT NULL,
-      amount REAL NOT NULL,
-      frequency TEXT
-    );
-  `);
-
-  await db.execAsync(`
-    CREATE TABLE IF NOT EXISTS budgets (
-      id TEXT PRIMARY KEY NOT NULL,
-      date TEXT NOT NULL,
-      income_id TEXT NOT NULL,
-      amount INTEGER NOT NULL DEFAULT 0,
-      remaining_balance REAL NOT NULL,
-      FOREIGN KEY (income_id) REFERENCES incomes(id)
-    );
-  `);
-
-  await db.execAsync(`
-    CREATE TABLE IF NOT EXISTS budget_expenses (
-      id TEXT PRIMARY KEY NOT NULL,
-      budget_id TEXT NOT NULL,
-      expense_id TEXT NOT NULL,
-      amount INTEGER NOT NULL DEFAULT 0,
-      paid INTEGER NOT NULL DEFAULT 0,
-      sort_order INTEGER NOT NULL DEFAULT 0,
-      expense_date TEXT,
-      FOREIGN KEY (budget_id) REFERENCES budgets(id),
-      FOREIGN KEY (expense_id) REFERENCES expenses(id)
-    );
-  `);
-
-  // Add expense_date column if it doesn't exist (for existing databases)
-  try {
-    await db.execAsync(`
-      ALTER TABLE budget_expenses ADD COLUMN expense_date TEXT;
-    `);
-  } catch (e) {
-    // Column already exists, ignore error
-  }
-  await db.execAsync(`
-    CREATE TABLE IF NOT EXISTS dismissed_budget_expenses (
-      id TEXT PRIMARY KEY NOT NULL,
-      expense_id TEXT NOT NULL,
-      expense_date TEXT NOT NULL
-    );
-  `);
-
-  await db.execAsync(`
-    CREATE TABLE IF NOT EXISTS settings (
-      id TEXT PRIMARY KEY NOT NULL,
-      currency TEXT NOT NULL DEFAULT 'CAD',
-      theme TEXT NOT NULL DEFAULT 'dark'
-    );
-  `);
-
-  // Initialize settings if they don't exist
-  const existingSettings = await db.getFirstAsync<{ id: string }>(
-    "SELECT id FROM settings WHERE id = ?;",
-    ["settings_id"]
-  );
-
-  if (!existingSettings) {
-    await db.runAsync(
-      "INSERT INTO settings (id, currency, theme) VALUES (?, ?, ?);",
-      ["settings_id", "CAD", "dark"]
-    );
-  }
+  await migrateDatabase(db);
 };
 
-//
-// ─── INCOME CRUD OPERATIONS ─────────────────────────────────────────────────────
-//
+function entryFromRow(row: DataRow): FinancialEntry {
+  return {
+    id: row.id,
+    name: row.name,
+    date: new Date(row.date),
+    amount: row.amount,
+    frequency: row.frequency ? JSON.parse(row.frequency) as FrequencyInterface : undefined,
+  };
+}
 
-/**
- * Inserts or updates an income record in the database.
- */
-export const addOrUpdateIncome = async (income: Partial<IncomeInterface>) => {
-  if (!db) return;
-
-  await db.runAsync(
-    `INSERT INTO incomes (id, name, date, amount, frequency) 
-     VALUES (?, ?, ?, ?, ?) 
-     ON CONFLICT(id) DO UPDATE SET name=?, date=?, amount=?, frequency=?;`,
-    [
-      income.id!,
-      income.name!,
-      income.date!.toISOString(),
-      income.amount!,
-      income.frequency ? JSON.stringify(income.frequency) : null,
-      income.name!,
-      income.date!.toISOString(),
-      income.amount!,
-      income.frequency ? JSON.stringify(income.frequency) : null,
-    ]
+async function writeSeries(
+  connection: Pick<SQLiteDatabase, "runAsync">,
+  table: "incomes" | "expenses",
+  item: Partial<FinancialEntry>
+): Promise<string> {
+  const id = item.id ?? uuid.v4().toString();
+  await connection.runAsync(
+    `INSERT INTO ${table} (id, name, date, amount, frequency)
+     VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET
+       name = excluded.name, date = excluded.date,
+       amount = excluded.amount, frequency = excluded.frequency;`,
+    [id, item.name!, item.date!.toISOString(), item.amount!, item.frequency ? JSON.stringify(item.frequency) : null]
   );
-
-  return income.id!;
-};
+  return id;
+}
 
 /**
  * Retrieves all incomes from the database.
@@ -196,21 +98,13 @@ export const getIncomes = async (): Promise<IncomeInterface[]> => {
 
   const result = await db.getAllAsync<DataRow>("SELECT * FROM incomes;", []);
 
-  return result.map((row) => ({
-    id: row.id,
-    name: row.name,
-    date: new Date(row.date),
-    amount: row.amount,
-    frequency: row.frequency
-      ? (JSON.parse(row.frequency) as FrequencyInterface)
-      : undefined,
-  }));
+  return result.map(entryFromRow);
 };
 
 /**
  * Retrieves a single income record by ID.
  */
-export const getIncomeById = async (
+const getIncomeById = async (
   id: string
 ): Promise<IncomeInterface | null> => {
   if (!db) return null;
@@ -221,77 +115,7 @@ export const getIncomeById = async (
   );
   if (!result) return null;
 
-  return {
-    id: result.id,
-    name: result.name,
-    date: new Date(result.date),
-    amount: result.amount,
-    frequency: result.frequency
-      ? (JSON.parse(result.frequency) as FrequencyInterface)
-      : undefined,
-  };
-};
-
-/**
- * Deletes an income record from the database.
- */
-export const deleteIncome = async (id: string) => {
-  if (!db) return;
-  await db.runAsync("DELETE FROM incomes WHERE id = ?;", [id]);
-};
-
-/**
- * Updates an existing income record in the database.
- */
-export const updateIncome = async (income: IncomeInterface) => {
-  if (!db) return;
-
-  await db.runAsync(
-    `UPDATE incomes 
-     SET name = ?, date = ?, amount = ?, frequency = ? 
-     WHERE id = ?;`,
-    [
-      income.name,
-      income.date.toISOString(),
-      income.amount,
-      income.frequency ? JSON.stringify(income.frequency) : null,
-      income.id,
-    ]
-  );
-};
-
-//
-// ─── EXPENSE CRUD OPERATIONS ────────────────────────────────────────────────────
-//
-
-/**
- * Inserts or updates an expense record in the database.
- */
-export const addOrUpdateExpense = async (
-  expense: Partial<ExpenseInterface>
-) => {
-  if (!db) return;
-
-  const expenseId = expense.id ?? uuid.v4().toString();
-
-  await db.runAsync(
-    `INSERT INTO expenses (id, name, date, amount, frequency) 
-     VALUES (?, ?, ?, ?, ?) 
-     ON CONFLICT(id) DO UPDATE SET name=?, date=?, amount=?, frequency=?;`,
-    [
-      expenseId,
-      expense.name!,
-      expense.date!.toISOString(),
-      expense.amount!,
-      expense.frequency ? JSON.stringify(expense.frequency) : null,
-      expense.name!,
-      expense.date!.toISOString(),
-      expense.amount!,
-      expense.frequency ? JSON.stringify(expense.frequency) : null,
-    ]
-  );
-
-  return expenseId;
+  return entryFromRow(result);
 };
 
 /**
@@ -302,21 +126,13 @@ export const getExpenses = async (): Promise<ExpenseInterface[]> => {
 
   const result = await db.getAllAsync<DataRow>("SELECT * FROM expenses;", []);
 
-  return result.map((row) => ({
-    id: row.id,
-    name: row.name,
-    date: new Date(row.date),
-    amount: row.amount,
-    frequency: row.frequency
-      ? (JSON.parse(row.frequency) as FrequencyInterface)
-      : undefined,
-  }));
+  return result.map(entryFromRow);
 };
 
 /**
  * Retrieves a single expense record by ID.
  */
-export const getExpenseById = async (
+const getExpenseById = async (
   id: string
 ): Promise<ExpenseInterface | null> => {
   if (!db) return null;
@@ -328,40 +144,7 @@ export const getExpenseById = async (
 
   if (!result) return null;
 
-  return {
-    id: result.id,
-    name: result.name,
-    date: new Date(result.date),
-    amount: result.amount,
-    frequency: result.frequency
-      ? (JSON.parse(result.frequency) as FrequencyInterface)
-      : undefined,
-  };
-};
-
-/**
- * Deletes an expense record from the database.
- */
-export const deleteExpense = async (id: string) => {
-  if (!db) return;
-  await db.runAsync(
-    "DELETE FROM dismissed_budget_expenses WHERE expense_id = ?;",
-    [id]
-  );
-  await db.runAsync("DELETE FROM expenses WHERE id = ?;", [id]);
-};
-
-export const dismissBudgetExpense = async (
-  expenseId: string,
-  expenseDate: Date | string
-) => {
-  if (!db) return;
-  const key = expenseOccurrenceKey(expenseId, expenseDate);
-  await db.runAsync(
-    `INSERT OR REPLACE INTO dismissed_budget_expenses (id, expense_id, expense_date)
-     VALUES (?, ?, ?);`,
-    [key, expenseId, new Date(expenseDate).toISOString()]
-  );
+  return entryFromRow(result);
 };
 
 export const getDismissedBudgetExpenseKeys = async (): Promise<string[]> => {
@@ -372,349 +155,225 @@ export const getDismissedBudgetExpenseKeys = async (): Promise<string[]> => {
   return rows.map((row) => row.id);
 };
 
-/**
- * Updates an existing expense record in the database.
- */
-export const updateExpense = async (expense: ExpenseInterface) => {
-  if (!db) return;
-
-  await db.runAsync(
-    `UPDATE expenses 
-     SET name = ?, date = ?, amount = ?, frequency = ? 
-     WHERE id = ?;`,
-    [
-      expense.name,
-      expense.date.toISOString(),
-      expense.amount,
-      expense.frequency ? JSON.stringify(expense.frequency) : null,
-      expense.id,
-    ]
-  );
-};
-
-//
-// ─── BUDGET CRUD OPERATIONS ─────────────────────────────────────────────────────
-//
-
-/**
- * Inserts or updates a budget record in the database.
- */
-export const addOrUpdateBudget = async (budget: StoredBudget) => {
-  if (!db) return;
+// Use the transaction's connection for every write and propagate every failure.
+async function writeBudget(
+  connection: Pick<SQLiteDatabase, "runAsync">,
+  budget: StoredBudget,
+  clearBills = true
+): Promise<string> {
   const budgetId = budget.id ?? uuid.v4().toString();
+  const dateString = typeof budget.date === "string"
+    ? budget.date
+    : new Date(budget.date).toISOString();
 
-  try {
-    // Ensure date is a string (ISO format)
-    const dateString =
-      typeof budget.date === "string"
-        ? budget.date
-        : new Date(budget.date).toISOString();
+  await connection.runAsync(
+    `INSERT INTO budgets (id, date, amount, income_id, remaining_balance, amount_override)
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET
+       date = excluded.date,
+       amount = excluded.amount,
+       income_id = excluded.income_id,
+       remaining_balance = excluded.remaining_balance, amount_override = excluded.amount_override;`,
+    [budgetId, dateString, budget.amount, budget.income.id, budget.remainingBalance, budget.amountOverride ? 1 : 0]
+  );
+  if (clearBills) await connection.runAsync("DELETE FROM budget_expenses WHERE budget_id = ?;", [budgetId]);
 
-    await db.runAsync(
-      `INSERT INTO budgets (id, date, amount, income_id, remaining_balance) 
-       VALUES (?, ?, ?, ?, ?) 
-       ON CONFLICT(id) DO UPDATE SET 
-         date = excluded.date, 
-         amount = excluded.amount, 
-         income_id = excluded.income_id, 
-         remaining_balance = excluded.remaining_balance;`,
+  for (let index = 0; index < budget.bills.length; index++) {
+    const bill = budget.bills[index];
+    const expenseDate = typeof bill.expense.date === "string"
+      ? bill.expense.date
+      : bill.expense.date.toISOString();
+    await connection.runAsync(
+      `INSERT INTO budget_expenses (id, budget_id, expense_id, paid, amount, sort_order, expense_date, name, assignment_override, amount_override)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET paid = ?, amount = ?, sort_order = ?, expense_date = ?, name = ?, assignment_override = ?, amount_override = ?;`,
       [
-        budget.id,
-        dateString,
-        budget.amount,
-        budget.income.id,
-        budget.remainingBalance,
+        bill.id ?? uuid.v4().toString(), budgetId, bill.expense.id,
+        bill.paid ? 1 : 0, bill.amount, index, expenseDate, bill.expense.name, bill.assignmentOverride ? 1 : 0, bill.amountOverride ? 1 : 0,
+        bill.paid ? 1 : 0, bill.amount, index, expenseDate, bill.expense.name, bill.assignmentOverride ? 1 : 0, bill.amountOverride ? 1 : 0,
       ]
     );
-
-    await db.runAsync("DELETE FROM budget_expenses WHERE budget_id = ?;", [
-      budgetId,
-    ]);
-
-    // Insert budget expenses sequentially to avoid statement conflicts
-    for (let index = 0; index < budget.bills.length; index++) {
-      const bill = budget.bills[index];
-      try {
-        // Store the expense occurrence date (not the base expense date)
-        const expenseDate =
-          typeof bill.expense.date === "string"
-            ? bill.expense.date
-            : bill.expense.date.toISOString();
-
-        await db.runAsync(
-          `INSERT INTO budget_expenses (id, budget_id, expense_id, paid, amount, sort_order, expense_date) 
-           VALUES (?, ?, ?, ?, ?, ?, ?) 
-           ON CONFLICT(id) DO UPDATE SET paid = ?, amount = ?, sort_order = ?, expense_date = ?;`,
-          [
-            bill.id ?? uuid.v4().toString(),
-            budgetId,
-            bill.expense.id,
-            bill.paid ? 1 : 0,
-            bill.amount,
-            index, // Sort order
-            expenseDate,
-            bill.paid ? 1 : 0,
-            bill.amount,
-            index,
-            expenseDate,
-          ]
-        );
-      } catch (billError) {
-        console.error(`❌ ERROR inserting budget expense ${index}:`, billError);
-      }
-    }
-  } catch (error) {
-    console.error("❌ ERROR inserting budget:", error);
-    throw error; // Re-throw to allow caller to handle
   }
-
   return budgetId;
+}
+
+export type ForecastSeriesChange = {
+  income?: IncomeInterface;
+  expense?: ExpenseInterface;
+  deleteIncomeId?: string;
+  deleteExpenseId?: string;
+  dismissExpense?: { id: string; date: Date };
 };
 
-/**
- * Retrieves all budgets from the database.
- */
-export const getBudgets = async (): Promise<StoredBudget[]> => {
-  if (!db) return [];
-
-  try {
-    // Fetch all budgets from the database
-    const budgetsResult = await db.getAllAsync<BudgetRow>(
-      "SELECT * FROM budgets;",
-      []
-    );
-    const budgets: StoredBudget[] = [];
-
-    for (const row of budgetsResult) {
-      // Fetch related income
-      const match = row.income_id.match(/^([a-f0-9-]{36})/);
-      const baseId = match ? match[1] : row.income_id;
-
-      const income = await getIncomeById(baseId);
-      if (!income) continue;
-
-      // Fetch related expenses for this budget
-      const expensesResult = await db.getAllAsync<ExpenseRow>(
-        "SELECT * FROM budget_expenses WHERE budget_id = ? ORDER BY sort_order ASC;",
-        [row.id]
-      );
-
-      const bills = [];
-      for (const expenseRow of expensesResult) {
-        const match = expenseRow.expense_id.match(/^([a-f0-9-]{36})/);
-        const baseId = match ? match[1] : expenseRow.expense_id;
-
-        const expense = await getExpenseById(baseId);
-        if (!expense) continue;
-
-        // Use the stored occurrence date if available, otherwise use the base expense date
-        const expenseDate = expenseRow.expense_date
-          ? new Date(expenseRow.expense_date)
-          : expense.date;
-
-        bills.push({
-          ...expenseRow,
-          amount: expenseRow.amount,
-          expense: {
-            ...expense,
-            amount: expenseRow.amount,
-            date: expenseDate,
-          },
-          paid: expenseRow.paid === 1,
-        });
-      }
-
-      const billTotal = bills.reduce((sum, bill) => sum + bill.amount, 0);
-
-      budgets.push({
-        id: row.id,
-        date: row.date,
-        income: {
-          ...income,
-          amount: row.amount,
-          date: new Date(row.date),
-        },
-        amount: row.amount,
-        bills,
-        remainingBalance: row.amount - billTotal,
-      });
+/** Replace the entire forecast atomically; failed writes restore the old rows. */
+export const replaceAllBudgets = async (
+  budgets: StoredBudget[],
+  unfundedExpenses: UnfundedExpense[] = [],
+  seriesChange?: ForecastSeriesChange,
+  previous?: BudgetForecast
+): Promise<void> => {
+  await setupDatabase();
+  if (!db) throw new Error("Database is not initialized");
+  const changes = previous ? forecastChanges(previous, { budgets, unfundedExpenses }) : undefined;
+  if (changes && !seriesChange && !changes.changedBudgets.length && !changes.changedUnfunded.length && !changes.removedBudgetIds.length && !changes.clearUnfundedIds.length) return;
+  const replace = async (transaction: Pick<SQLiteDatabase, "runAsync">) => {
+    if (seriesChange?.income) await writeSeries(transaction, "incomes", seriesChange.income);
+    if (seriesChange?.expense) await writeSeries(transaction, "expenses", seriesChange.expense);
+    if (changes) {
+      // Clear every affected assignment before inserting moves with stable row IDs.
+      for (const id of changes.clearBudgetIds) await transaction.runAsync("DELETE FROM budget_expenses WHERE budget_id = ?;", [id]);
+      for (const id of changes.removedBudgetIds) await transaction.runAsync("DELETE FROM budgets WHERE id = ?;", [id]);
+      for (const id of changes.clearUnfundedIds) await transaction.runAsync("DELETE FROM unfunded_budget_expenses WHERE id = ?;", [id]);
+    } else {
+      await transaction.runAsync("DELETE FROM budget_expenses;", []);
+      await transaction.runAsync("DELETE FROM budgets;", []);
+      await transaction.runAsync("DELETE FROM unfunded_budget_expenses;", []);
     }
+    if (seriesChange?.deleteIncomeId) {
+      await transaction.runAsync("DELETE FROM incomes WHERE id = ?;", [seriesChange.deleteIncomeId]);
+    }
+    if (seriesChange?.deleteExpenseId) {
+      await transaction.runAsync("DELETE FROM dismissed_budget_expenses WHERE expense_id = ?;", [seriesChange.deleteExpenseId]);
+      await transaction.runAsync("DELETE FROM expenses WHERE id = ?;", [seriesChange.deleteExpenseId]);
+    }
+    if (seriesChange?.dismissExpense) {
+      const item = seriesChange.dismissExpense;
+      await transaction.runAsync(
+        "INSERT OR REPLACE INTO dismissed_budget_expenses (id, expense_id, expense_date) VALUES (?, ?, ?);",
+        [expenseOccurrenceKey(item.id, item.date), item.id, item.date.toISOString()]
+      );
+    }
+    for (const budget of changes?.changedBudgets ?? budgets) {
+      await writeBudget(transaction, budget, !changes);
+    }
+    for (const item of changes?.changedUnfunded ?? unfundedExpenses) {
+      await transaction.runAsync(
+        "INSERT INTO unfunded_budget_expenses (id, expense_id, expense_date, amount, paid, shortfall, name, amount_override) VALUES (?, ?, ?, ?, ?, ?, ?, ?);",
+        [item.id, item.expense.id, item.expense.date.toISOString(), item.amount, item.paid ? 1 : 0, item.shortfall, item.expense.name, item.amountOverride ? 1 : 0]
+      );
+    }
+  };
 
-    return budgets;
-  } catch (e) {
-    console.error(e);
-    return [];
-  }
+  await runTransaction(replace);
 };
 
-/**
- * Retrieves a single budget record by ID.
- */
-export const getBudgetById = async (
-  id: string
-): Promise<StoredBudget | null> => {
-  if (!db) return null;
-
-  // Fetch the budget
-  const budgetResult = await db.getFirstAsync<BudgetRow>(
-    "SELECT * FROM budgets WHERE id = ?;",
-    [id]
-  );
-  if (!budgetResult) return null;
-
-  // Fetch the related income
-  const income = await getIncomeById(budgetResult.income_id);
-  if (!income) return null;
-
-  const amount = income.amount;
-
-  // Fetch the related expenses
-  const expensesResult = await db.getAllAsync<ExpenseRow>(
-    "SELECT * FROM budget_expenses WHERE budget_id = ? ORDER BY sort_order ASC;;",
-    [id]
-  );
-
-  const bills = [];
-  for (const expenseRow of expensesResult) {
-    const expense = await getExpenseById(expenseRow.expense_id);
+/** Restore occurrence details before recalculating the forecast on load. */
+export const getUnfundedExpenses = async (): Promise<UnfundedExpense[]> => {
+  if (!db) return [];
+  const rows = await db.getAllAsync<{
+    id: string; expense_id: string; expense_date: string;
+    amount: number; paid: number; shortfall: number; name?: string; amount_override?: number;
+  }>("SELECT * FROM unfunded_budget_expenses ORDER BY expense_date, id;", []);
+  const items: UnfundedExpense[] = [];
+  for (const row of rows) {
+    const expense = await getExpenseById(row.expense_id) ?? (isManualBudgetExpense(row.expense_id) ? {
+      id: row.expense_id, name: row.name || "Expense", amount: row.amount,
+      date: new Date(row.expense_date), frequency: undefined,
+    } : null);
     if (!expense) continue;
-
-    // Use the stored occurrence date if available, otherwise use the base expense date
-    const expenseDate = expenseRow.expense_date
-      ? new Date(expenseRow.expense_date)
-      : expense.date;
-
-    bills.push({
-      ...expenseRow,
-      expense: {
-        ...expense,
-        date: expenseDate,
-      },
-      paid: expenseRow.paid === 1,
+    items.push({
+      id: row.id, amount: row.amount, paid: row.paid === 1, shortfall: row.shortfall,
+      ...(row.amount_override === 1 ? { amountOverride: true } : {}),
+      expense: { ...expense, date: new Date(row.expense_date), amount: row.amount },
     });
   }
+  return items;
+};
 
+const expenseForBudgetRow = (
+  expenseRow: ExpenseRow,
+  expense: ExpenseInterface | null
+): ExpenseInterface | null => {
+  const expenseDate = expenseRow.expense_date
+    ? new Date(expenseRow.expense_date)
+    : expense?.date;
+  if (!expenseDate) return null;
+  if (expense) {
+    return {
+      ...expense,
+      amount: expenseRow.amount,
+      date: expenseDate,
+    };
+  }
+  if (!isManualBudgetExpense(expenseRow.expense_id)) return null;
   return {
-    id: budgetResult.id,
-    date: budgetResult.date,
-    income,
-    amount,
-    bills,
-    remainingBalance: budgetResult.remaining_balance,
+    id: expenseRow.expense_id,
+    name: expenseRow.name?.trim() || "Expense",
+    date: expenseDate,
+    amount: expenseRow.amount,
+    frequency: undefined,
   };
 };
 
-/**
- * Deletes a budget record from the database.
- */
-export const deleteBudget = async (id: string) => {
-  if (!db) return;
+async function runTransaction(task: (connection: SQLiteDatabase) => Promise<void>): Promise<void> {
+  await setupDatabase();
+  const connection = db;
+  if (!connection) throw new Error("Database is not initialized");
+  if (Platform.OS === "web") await connection.withTransactionAsync(() => task(connection));
+  else await connection.withExclusiveTransactionAsync(task);
+}
 
-  await db.runAsync("DELETE FROM budget_expenses WHERE budget_id = ?;", [id]);
-  await db.runAsync("DELETE FROM budgets WHERE id = ?;", [id]);
-};
+export const getBudgets = async (): Promise<StoredBudget[]> => {
+  if (!db) throw new Error("Database is not initialized");
 
-/**
- * Deletes all budget records from the database.
- */
-export const clearAllBudgets = async () => {
-  if (!db) return;
-
-  await db.runAsync("DELETE FROM budget_expenses;", []);
-  await db.runAsync("DELETE FROM budgets;", []);
-};
-
-/**
- * Deletes a budget record from the database.
- */
-export const clearAllBudgetExpenses = async (budgetId: string) => {
-  if (!db) return;
-
-  await db.runAsync("DELETE FROM budget_expenses where budget_id=?;", [
-    budgetId,
-  ]);
-};
-
-/**
- * Deletes an expense from a budget.
- */
-export const deleteExpenseFromBudgetInDB = async (
-  rowId: string,
-  budgetId: string
-) => {
-  if (!db) return;
-
-  await db.runAsync(
-    "DELETE FROM budget_expenses WHERE budget_id = ? AND id = ?;",
-    [budgetId, rowId]
+  // Fetch all budgets from the database
+  const budgetsResult = await db.getAllAsync<BudgetRow>(
+    "SELECT * FROM budgets;",
+    []
   );
+  const budgets: StoredBudget[] = [];
 
-  // Recalculate remaining_balance for the budget
-  const budgetResult = await db.getFirstAsync<{ amount: number }>(
-    "SELECT amount FROM budgets WHERE id = ?;",
-    [budgetId]
-  );
+  for (const row of budgetsResult) {
+    // Fetch related income
+    const match = row.income_id.match(/^([a-f0-9-]{36})/);
+    const baseId = match ? match[1] : row.income_id;
 
-  if (budgetResult) {
-    const expensesResult = await db.getAllAsync<{ amount: number }>(
-      "SELECT amount FROM budget_expenses WHERE budget_id = ?;",
-      [budgetId]
+    const income = await getIncomeById(baseId);
+    if (!income) continue;
+
+    // Fetch related expenses for this budget
+    const expensesResult = await db.getAllAsync<ExpenseRow>(
+      "SELECT * FROM budget_expenses WHERE budget_id = ? ORDER BY sort_order ASC;",
+      [row.id]
     );
-    const totalExpenses = expensesResult.reduce((sum, e) => sum + e.amount, 0);
-    const remainingBalance = budgetResult.amount - totalExpenses;
 
-    await db.runAsync(
-      "UPDATE budgets SET remaining_balance = ? WHERE id = ?;",
-      [remainingBalance, budgetId]
-    );
+    const bills = [];
+    for (const expenseRow of expensesResult) {
+      const match = expenseRow.expense_id.match(/^([a-f0-9-]{36})/);
+      const baseId = match ? match[1] : expenseRow.expense_id;
+
+      const expense = expenseForBudgetRow(
+        expenseRow,
+        await getExpenseById(baseId)
+      );
+      if (!expense) continue;
+
+      bills.push({
+        ...expenseRow,
+        ...(expenseRow.assignment_override === 1 ? { assignmentOverride: true } : {}),
+        ...(expenseRow.amount_override === 1 ? { amountOverride: true } : {}),
+        amount: expenseRow.amount,
+        expense,
+        paid: expenseRow.paid === 1,
+      });
+    }
+
+    budgets.push({
+      id: row.id,
+      date: row.date,
+      income: {
+        ...income,
+        amount: row.amount,
+        date: new Date(row.date),
+      },
+      amount: row.amount,
+      bills,
+      remainingBalance: calculateRemainingBalance(row.amount, bills.map((bill) => bill.amount)),
+      ...(row.amount_override === 1 ? { amountOverride: true } : {}),
+    });
   }
-};
 
-/**
- * Retrieves the paid status of an expense.
- */
-export const getPaidStatusFromDB = async (
-  budgetId: string,
-  rowId: string
-): Promise<boolean> => {
-  if (!db) return false;
-
-  const result = await db.getFirstAsync<ExpenseRow>(
-    "SELECT paid FROM budget_expenses WHERE budget_id = ? AND id = ?;",
-    [budgetId, rowId]
-  );
-
-  return result ? result.paid === 1 : false;
-};
-
-/**
- * Moves an expense from one budget to another.
- */
-export const moveExpenseBetweenBudgetsInDB = async (
-  fromBudgetId: string,
-  expenseId: string,
-  toBudgetId: string,
-  rowId: string,
-  amount: number
-) => {
-  if (!db) return;
-
-  // Remove from old budget
-  await deleteExpenseFromBudgetInDB(rowId, fromBudgetId);
-
-  // Find max sort_order for the new budget
-  const maxOrderResult = await db.getFirstAsync<{ maxOrder: number }>(
-    "SELECT MAX(sort_order) as maxOrder FROM budget_expenses WHERE budget_id = ?;",
-    [toBudgetId]
-  );
-
-  const newSortOrder = (maxOrderResult?.maxOrder ?? -1) + 1;
-
-  // Insert into new budget with correct sort order
-  await db.runAsync(
-    "INSERT INTO budget_expenses (id, budget_id, expense_id, paid, amount, sort_order) VALUES (?, ?, ?, ?, ?, ?);",
-    [uuid.v4().toString(), toBudgetId, expenseId, 0, amount, newSortOrder]
-  );
+  return budgets;
 };
 
 /**
@@ -725,104 +384,35 @@ export const setPaidStatusInDB = async (
   rowId: string,
   isPaid: boolean
 ) => {
-  if (!db) return;
+  if (!db) throw new Error("Database is not initialized");
 
-  await db.runAsync(
+  const result = await db.runAsync(
     "UPDATE budget_expenses SET paid = ? WHERE budget_id = ? AND id = ?;",
     [isPaid ? 1 : 0, budgetId, rowId]
   );
-};
-
-/**
- * Toggles the paid status of an expense.
- */
-export const toggleExpensePaidInDB = async (
-  budgetId: string,
-  expenseId: string
-) => {
-  if (!db) return;
-
-  const currentStatus = await getPaidStatusFromDB(budgetId, expenseId);
-  await setPaidStatusInDB(budgetId, expenseId, !currentStatus);
-  return !currentStatus;
-};
-
-/**
- * Updates an expense amount in a budget.
- */
-export const updateExpenseAmountInDB = async (
-  budgetId: string,
-  rowId: string,
-  newAmount: number
-) => {
-  if (!db) return;
-
-  await db.runAsync(
-    "UPDATE budget_expenses SET amount = ? WHERE budget_id = ? AND id = ?;",
-    [newAmount, budgetId, rowId]
-  );
-
-  // Recalculate remaining_balance for the budget
-  const budgetResult = await db.getFirstAsync<{ amount: number }>(
-    "SELECT amount FROM budgets WHERE id = ?;",
-    [budgetId]
-  );
-
-  if (budgetResult) {
-    const expensesResult = await db.getAllAsync<{ amount: number }>(
-      "SELECT amount FROM budget_expenses WHERE budget_id = ?;",
-      [budgetId]
-    );
-    const totalExpenses = expensesResult.reduce((sum, e) => sum + e.amount, 0);
-    const remainingBalance = budgetResult.amount - totalExpenses;
-
-    await db.runAsync(
-      "UPDATE budgets SET remaining_balance = ? WHERE id = ?;",
-      [remainingBalance, budgetId]
-    );
-  }
+  if (result.changes !== 1) throw new Error("Expense occurrence not found");
 };
 
 /**
  * Updates the order of expenses in a budget.
  */
-export const updateExpenseOrderInDB = async (
-  budgetId: string,
-  newOrder: { id: string }[]
-) => {
-  if (!db) return;
-
-  for (let index = 0; index < newOrder.length; index++) {
-    const expense = newOrder[index];
-
-    await db.runAsync(
-      "UPDATE budget_expenses SET sort_order = ? WHERE budget_id = ? AND id = ?;",
-      [index, budgetId, expense.id]
+export const updateExpenseOrderInDB = async (budgetId: string, newOrder: { id: string }[]) => {
+  await runTransaction(async connection => {
+    const rows = await connection.getAllAsync<{ id: string }>(
+      "SELECT id FROM budget_expenses WHERE budget_id = ?;", [budgetId]
     );
-  }
-};
-
-/**
- * Updates the income amount in a budget.
- */
-export const updateIncomeAmountInDB = async (
-  budgetId: string,
-  newAmount: number
-) => {
-  if (!db) return;
-
-  // Get current total expenses to recalculate remaining_balance
-  const expensesResult = await db.getAllAsync<{ amount: number }>(
-    "SELECT amount FROM budget_expenses WHERE budget_id = ?;",
-    [budgetId]
-  );
-  const totalExpenses = expensesResult.reduce((sum, e) => sum + e.amount, 0);
-  const remainingBalance = newAmount - totalExpenses;
-
-  await db.runAsync(
-    "UPDATE budgets SET amount = ?, remaining_balance = ? WHERE id = ?",
-    [newAmount, remainingBalance, budgetId]
-  );
+    const ids = new Set(newOrder.map(item => item.id));
+    if (rows.length !== newOrder.length || ids.size !== newOrder.length || rows.some(row => !ids.has(row.id))) {
+      throw new Error("Expense order is stale; please refresh");
+    }
+    for (let index = 0; index < newOrder.length; index++) {
+      const result = await connection.runAsync(
+        "UPDATE budget_expenses SET sort_order = ? WHERE budget_id = ? AND id = ?;",
+        [index, budgetId, newOrder[index].id]
+      );
+      if (result.changes !== 1) throw new Error("Expense occurrence not found");
+    }
+  });
 };
 
 /**

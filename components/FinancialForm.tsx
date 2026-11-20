@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
+import { useEffect, useRef, useState } from "react";
 import {
   AccessibilityInfo,
   Alert,
@@ -12,27 +13,30 @@ import {
   View,
 } from "react-native";
 
-import DateTimePicker from "@react-native-community/datetimepicker";
+import DateTimePicker, { type DateTimePickerEvent } from "@react-native-community/datetimepicker";
 import { Picker } from "@react-native-picker/picker";
 import { KeyboardAwareScrollView } from "react-native-keyboard-aware-scroll-view";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import useBudgetStore from "../store/useBudgetStore";
 import { Colors } from "../constants/Colors";
+import { parseMoneyInput } from "../utils/money";
+import { currencySettings } from "../types/settings";
+import { FinancialEntry, FinancialEntryDraft } from "../types/financialEntry";
 import { FrequencyInterface } from "../types/frequency";
 
-interface FinancialFormProps<T> {
-  formData: any;
-  setFormData: (data: Partial<T>) => void;
+interface FinancialFormProps {
+  formData: FinancialEntryDraft;
+  setFormData: (data: FinancialEntryDraft) => void;
   isEditing: boolean;
-  handleSubmit: (data: Partial<T>) => void;
+  handleSubmit: (data: Partial<FinancialEntry>) => Promise<void>;
   showDatePicker: boolean;
   setShowDatePicker: (show: boolean) => void;
   resetForm: () => void;
-  handleDateChange: (event: any, date?: Date) => void;
+  handleDateChange: (event: DateTimePickerEvent, date?: Date) => void;
 }
 
-const FinancialForm = <T extends { id: string; date: Date }>({
+const FinancialForm = ({
   formData,
   setFormData,
   isEditing,
@@ -41,7 +45,9 @@ const FinancialForm = <T extends { id: string; date: Date }>({
   setShowDatePicker,
   resetForm,
   handleDateChange,
-}: FinancialFormProps<T>) => {
+}: FinancialFormProps) => {
+  const saving = useRef(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [rawAmount, setRawAmount] = useState<string>(
     formData.amount?.toString() || ""
   );
@@ -63,7 +69,12 @@ const FinancialForm = <T extends { id: string; date: Date }>({
     return false;
   });
   const [isKeyboardOpen, setIsKeyboardOpen] = useState(false);
-  const { settings } = useBudgetStore();
+  const { settings } = useBudgetStore(
+    useShallow(state => ({
+      settings: state.settings,
+    }))
+  );
+  const decimals = currencySettings[settings?.currency ?? "CAD"]?.decimals ?? 2;
   const theme = settings?.theme ?? "dark";
   const colorScheme = Colors[theme];
 
@@ -102,15 +113,15 @@ const FinancialForm = <T extends { id: string; date: Date }>({
   }, []);
 
   const handleAmountChange = (text: string) => {
-    const sanitizedText = text.replace(/[^0-9.]/g, "");
-    const parsedAmount = parseFloat(sanitizedText) || 0;
-
-    setRawAmount(sanitizedText);
-    setFormData({ ...formData, amount: parsedAmount });
+    setRawAmount(text);
+    setFormData({ ...formData, amount: parseMoneyInput(text, decimals) ?? undefined });
   };
 
   const handleAmountBlur = () => {
-    setRawAmount(formData.amount?.toFixed(2) || "");
+    const amount = parseMoneyInput(rawAmount, decimals);
+    if (amount === null) return;
+    setRawAmount(amount.toFixed(decimals));
+    setFormData({ ...formData, amount });
   };
 
   const handleFrequencyChange = (text: string) => {
@@ -125,7 +136,17 @@ const FinancialForm = <T extends { id: string; date: Date }>({
     }
   };
 
-  const validateAndSubmit = () => {
+  const validateAndSubmit = async () => {
+    if (saving.current) return;
+    const amount = parseMoneyInput(rawAmount, decimals);
+    if (amount === null) {
+      Alert.alert("Invalid amount", `Enter a complete number with no more than ${decimals} decimal places.`);
+      return;
+    }
+    if (!formData.name?.trim() || !(formData.date instanceof Date) || !Number.isFinite(formData.date.getTime())) {
+      Alert.alert("Missing details", "Enter a name and a valid date.");
+      return;
+    }
     const frequency = isOneTime
       ? undefined
       : {
@@ -147,12 +168,22 @@ const FinancialForm = <T extends { id: string; date: Date }>({
       return;
     }
 
-    const payload = { ...formData, frequency };
+    const payload = { ...formData, name: formData.name.trim(), amount, frequency };
     setFormData(payload);
     AccessibilityInfo.announceForAccessibility(
       isEditing ? "Updating financial entry" : "Adding financial entry"
     );
-    handleSubmit(payload);
+    saving.current = true;
+    setIsSubmitting(true);
+    try {
+      await handleSubmit(payload);
+    } catch {
+      Alert.alert("Unable to save entry", "Your entry was not saved. Please try again.");
+      AccessibilityInfo.announceForAccessibility("Entry was not saved. Please try again.");
+    } finally {
+      saving.current = false;
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -178,6 +209,7 @@ const FinancialForm = <T extends { id: string; date: Date }>({
         <Text style={[styles.label, { color: colorScheme.text }]}>Name</Text>
         <TextInput
           placeholder="Enter name"
+          accessibilityLabel="Name"
           value={formData.name || ""}
           onChangeText={(text) => setFormData({ ...formData, name: text })}
           style={[
@@ -193,6 +225,8 @@ const FinancialForm = <T extends { id: string; date: Date }>({
         <Text style={[styles.label, { color: colorScheme.text }]}>Date</Text>
         <TouchableOpacity
           onPress={() => setShowDatePicker(true)}
+          accessibilityRole="button"
+          accessibilityLabel={`Date: ${formData.date ? formData.date.toLocaleDateString() : "Select date"}`}
           style={[
             styles.input,
             {
@@ -221,6 +255,7 @@ const FinancialForm = <T extends { id: string; date: Date }>({
         <Text style={[styles.label, { color: colorScheme.text }]}>Amount</Text>
         <TextInput
           placeholder="Enter amount"
+          accessibilityLabel="Amount"
           value={rawAmount}
           onChangeText={handleAmountChange}
           onBlur={handleAmountBlur}
@@ -241,6 +276,9 @@ const FinancialForm = <T extends { id: string; date: Date }>({
             One-Time Occurrence
           </Text>
           <Switch
+            accessibilityRole="switch"
+            accessibilityLabel="One-Time Occurrence"
+            accessibilityState={{ checked: isOneTime }}
             value={isOneTime}
             onValueChange={(value) => {
               setIsOneTime(value);
@@ -269,6 +307,7 @@ const FinancialForm = <T extends { id: string; date: Date }>({
             <View style={styles.frequencyContainer}>
               <TextInput
                 placeholder="1"
+                accessibilityLabel="Repeat every"
                 value={
                   formData.frequency?.unit === "semi-monthly"
                     ? "1"
@@ -299,6 +338,7 @@ const FinancialForm = <T extends { id: string; date: Date }>({
                 ]}
               >
                 <Picker
+                  accessibilityLabel="Frequency unit"
                   selectedValue={formData.frequency?.unit || "months"}
                   onValueChange={(itemValue) => {
                     const isSemiMonthly = itemValue === "semi-monthly";
@@ -326,17 +366,20 @@ const FinancialForm = <T extends { id: string; date: Date }>({
 
         <TouchableOpacity
           onPress={validateAndSubmit}
+          disabled={isSubmitting}
+          accessibilityState={{ disabled: isSubmitting, busy: isSubmitting }}
           style={[
             styles.submitButton,
             { backgroundColor: colorScheme.submitButton },
           ]}
         >
           <Text style={[styles.buttonText, { color: colorScheme.buttonText }]}>
-            {isEditing ? "Update" : "Add"}
+            {isSubmitting ? "Saving…" : isEditing ? "Update" : "Add"}
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
           onPress={resetForm}
+          disabled={isSubmitting}
           style={[
             styles.resetButton,
             { backgroundColor: colorScheme.resetButton },

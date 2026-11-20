@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { ScrollView, StyleSheet } from "react-native";
 
 import { ThemedText } from "../../components/ThemedText";
@@ -7,14 +7,13 @@ import { Colors } from "../../constants/Colors";
 import useBudgetStore from "../../store/useBudgetStore";
 
 export default function TabOneScreen() {
-  const { fetchAndCleanBudgets, settings } = useBudgetStore();
+  const { settings } = useBudgetStore(
+    useShallow(state => ({
+      settings: state.settings,
+    }))
+  );
   const colorScheme = settings?.theme === "dark" ? Colors.dark : Colors.light;
 
-  useEffect(() => {
-    fetchAndCleanBudgets().catch((error) =>
-      console.error("❌ Failed to load budgets:", error)
-    );
-  }, []);
 
   return (
     <ScrollView
@@ -47,7 +46,7 @@ export default function TabOneScreen() {
           style={[styles.disclaimerText, { color: colorScheme.text }]}
           accessibilityLabel="Spending management"
         >
-          - Consider adding an "expense" for **weekly discretionary spending**.
+          - Consider adding an &quot;expense&quot; for **weekly discretionary spending**.
           Any leftover funds can be allocated toward **savings or investments**.
         </ThemedText>
 

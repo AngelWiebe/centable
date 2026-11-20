@@ -1,9 +1,3 @@
-import { FrequencyInterface } from "./frequency";
+import { FinancialEntry } from "./financialEntry";
 
-export interface ExpenseInterface {
-  id: string;
-  name: string;
-  date: Date;
-  frequency: FrequencyInterface | undefined;
-  amount: number;
-}
+export type ExpenseInterface = FinancialEntry;

@@ -1,9 +1,9 @@
+import { useShallow } from "zustand/react/shallow";
+import DateTimePicker from "@react-native-community/datetimepicker";
 import { MaterialIcons } from "@expo/vector-icons";
 import React, {
   useCallback,
-  useContext,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -18,222 +18,40 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { Gesture, GestureDetector } from "react-native-gesture-handler";
-import Animated, {
-  runOnJS,
-  useAnimatedStyle,
-  useSharedValue,
-  withTiming,
-} from "react-native-reanimated";
+import { useSharedValue } from "react-native-reanimated";
 
 import useBudgetStore from "../store/useBudgetStore";
 import { Colors } from "../constants/Colors";
 import { StoredBudget } from "../types/budget";
 import { currencySettings } from "../types/settings";
-import { BudgetScrollContext } from "./BudgetScrollContext";
+import ExpenseActions from "./ExpenseActions";
+import DraggableExpenseRow from "./DraggableExpenseRow";
 
 type BudgetBill = StoredBudget["bills"][number];
-type SharedNumber = ReturnType<typeof useSharedValue<number>>;
-
-const ROW_GAP = 16;
-
-function DraggableExpenseRow({
-  index,
-  count,
-  dragY,
-  activeIndex,
-  activeHeight,
-  settled,
-  onReorder,
-  cardColor,
-  dragColor,
-  accentColor,
-  enabled,
-  children,
-}: {
-  index: number;
-  count: number;
-  dragY: SharedNumber;
-  activeIndex: SharedNumber;
-  activeHeight: SharedNumber;
-  settled: SharedNumber;
-  onReorder: (from: number, to: number) => void;
-  cardColor: string;
-  dragColor: string;
-  accentColor: string;
-  enabled: boolean;
-  children: React.ReactNode;
-}) {
-  const scroll = useContext(BudgetScrollContext);
-  const held = useSharedValue(0);
-  const origin = useSharedValue(-1);
-  const lifted = useSharedValue(0);
-  const slot = useSharedValue(index);
-  const shift = useSharedValue(0);
-  const grabY = useSharedValue(0);
-  const indexSV = useSharedValue(index);
-  // Update before paint so the release offset shrinks by the same amount
-  // the row's layout slot moves.
-  useLayoutEffect(() => {
-    indexSV.value = index;
-  }, [index, indexSV]);
-
-  const gesture = useMemo(() => {
-    const setScrollEnabled = scroll?.setScrollEnabled;
-    const pan = Gesture.Pan()
-      .enabled(enabled)
-      .activateAfterLongPress(220)
-      .shouldCancelWhenOutside(false)
-      .onStart((event) => {
-        // Translation includes movement from the initial touch. Keep the row
-        // where it was when the long press actually grabbed it.
-        grabY.value = event.translationY;
-        dragY.value = 0;
-        activeIndex.value = index;
-        lifted.value = 1;
-        if (setScrollEnabled) runOnJS(setScrollEnabled)(false);
-      })
-      .onUpdate((event) => {
-        dragY.value = event.translationY - grabY.value;
-      })
-      .onEnd((event) => {
-        const step = activeHeight.value + ROW_GAP;
-        const from = index;
-        const translation = event.translationY - grabY.value;
-        if (step <= ROW_GAP) {
-          dragY.value = 0;
-          activeIndex.value = -1;
-          lifted.value = 0;
-          return;
-        }
-        const to = Math.max(
-          0,
-          Math.min(count - 1, from + Math.round(translation / step))
-        );
-        const delta = (to - from) * step;
-        dragY.value = withTiming(delta, { duration: 140 }, (finished) => {
-          if (!finished) return;
-          if (from === to) {
-            activeIndex.value = -1;
-            lifted.value = 0;
-            return;
-          }
-          held.value = delta;
-          settled.value = 1;
-          runOnJS(onReorder)(from, to);
-        });
-      })
-      .onFinalize((_event, success) => {
-        if (setScrollEnabled) runOnJS(setScrollEnabled)(true);
-        if (success || activeIndex.value !== index) return;
-        dragY.value = withTiming(0, { duration: 140 }, (finished) => {
-          if (!finished) return;
-          activeIndex.value = -1;
-          lifted.value = 0;
-        });
-      });
-
-    if (scroll?.listRef) {
-      pan.blocksExternalGesture(scroll.listRef as never);
-    }
-    return pan;
-  }, [
-    activeHeight,
-    activeIndex,
-    count,
-    dragY,
-    enabled,
-    grabY,
-    held,
-    index,
-    lifted,
-    onReorder,
-    scroll,
-    settled,
-  ]);
-
-  const animatedStyle = useAnimatedStyle(() => {
-    const step = activeHeight.value + ROW_GAP;
-    const from = activeIndex.value;
-    const current = indexSV.value;
-    const isActive = lifted.value === 1;
-    let translateY = 0;
-
-    if (from < 0 && !settled.value) {
-      origin.value = -1;
-      slot.value = current;
-      shift.value = 0;
-      lifted.value = 0;
-    } else if (settled.value && origin.value >= 0 && step > ROW_GAP) {
-      translateY = held.value - (current - origin.value) * step;
-    } else if (from >= 0 && step > ROW_GAP) {
-      if (origin.value < 0) origin.value = current;
-      const target = Math.max(
-        0,
-        Math.min(count - 1, from + Math.round(dragY.value / step))
-      );
-      if (current === from) {
-        translateY = dragY.value;
-        held.value = translateY;
-      } else {
-        let nextSlot = current;
-        if (from < target && current > from && current <= target) {
-          nextSlot = current - 1;
-          translateY = -step;
-        } else if (from > target && current < from && current >= target) {
-          nextSlot = current + 1;
-          translateY = step;
-        }
-        held.value = translateY;
-        if (slot.value !== nextSlot) {
-          slot.value = nextSlot;
-          shift.value = withTiming(translateY, { duration: 150 });
-        }
-        translateY = shift.value;
-      }
-    }
-
-    return {
-      transform: [{ translateY }],
-      zIndex: isActive ? 20 : 0,
-      backgroundColor: isActive ? dragColor : cardColor,
-      borderColor: isActive ? accentColor : "transparent",
-      borderWidth: 2,
-      borderRadius: 8,
-    };
-  });
-
-  return (
-    <GestureDetector gesture={gesture}>
-      <Animated.View
-        style={[
-          { marginBottom: index === count - 1 ? 0 : ROW_GAP },
-          animatedStyle,
-        ]}
-        onLayout={(event) => {
-          const height = event.nativeEvent.layout.height;
-          if (height > 0) activeHeight.value = height;
-        }}
-      >
-        {children}
-      </Animated.View>
-    </GestureDetector>
-  );
-}
-
 interface BudgetItemProps {
   budget: StoredBudget;
 }
 
 const BudgetItem: React.FC<BudgetItemProps> = ({ budget }) => {
   const {
+    addExpenseToBudget,
     deleteExpenseFromBudget,
     updateExpenseOrder,
     updateExpenseAmount,
     updateIncomeAmount,
     settings,
     toggleExpensePaid,
-  } = useBudgetStore();
+  } = useBudgetStore(
+    useShallow(state => ({
+      addExpenseToBudget: state.addExpenseToBudget,
+      deleteExpenseFromBudget: state.deleteExpenseFromBudget,
+      updateExpenseOrder: state.updateExpenseOrder,
+      updateExpenseAmount: state.updateExpenseAmount,
+      updateIncomeAmount: state.updateIncomeAmount,
+      settings: state.settings,
+      toggleExpensePaid: state.toggleExpensePaid,
+    }))
+  );
   const theme = settings?.theme ?? "dark";
   const colorScheme = Colors[theme];
   const { symbol, decimals } = currencySettings[settings?.currency || "CAD"];
@@ -241,6 +59,11 @@ const BudgetItem: React.FC<BudgetItemProps> = ({ budget }) => {
   const [editingIncome, setEditingIncome] = useState(false);
   const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
   const [editedAmount, setEditedAmount] = useState<string | null>(null);
+  const [addingExpense, setAddingExpense] = useState(false);
+  const [draftTitle, setDraftTitle] = useState("");
+  const [draftAmount, setDraftAmount] = useState("");
+  const [draftDate, setDraftDate] = useState(() => new Date(budget.date));
+  const [showDraftDatePicker, setShowDraftDatePicker] = useState(false);
   const incomeInputRef = useRef<TextInputInstance>(null);
 
   const bills = useMemo(() => budget.bills, [budget.bills]);
@@ -255,11 +78,16 @@ const BudgetItem: React.FC<BudgetItemProps> = ({ budget }) => {
     setTimeout(() => incomeInputRef.current?.focus(), 100);
   };
 
-  const saveIncome = () => {
+  const saveIncome = async () => {
     if (editedAmount !== null) {
       const parsedAmount = parseFloat(editedAmount);
       if (!isNaN(parsedAmount) && parsedAmount >= 0) {
-        updateIncomeAmount(budget.id, parsedAmount);
+        try {
+          await updateIncomeAmount(budget.id, parsedAmount);
+        } catch {
+          Alert.alert("Unable to save income", "Your previous budget is unchanged. Please try again.");
+          return;
+        }
         announceChange(
           `Income updated to ${symbol}${parsedAmount.toFixed(decimals)}`
         );
@@ -274,11 +102,16 @@ const BudgetItem: React.FC<BudgetItemProps> = ({ budget }) => {
     setEditedAmount(amount.toFixed(decimals));
   };
 
-  const saveExpense = (rowId: string) => {
+  const saveExpense = async (rowId: string) => {
     if (editedAmount !== null) {
       const parsedAmount = parseFloat(editedAmount);
       if (!isNaN(parsedAmount) && parsedAmount >= 0) {
-        updateExpenseAmount(budget.id, rowId, parsedAmount);
+        try {
+          await updateExpenseAmount(budget.id, rowId, parsedAmount);
+        } catch {
+          Alert.alert("Unable to save expense", "Your previous budget is unchanged. Please try again.");
+          return;
+        }
         announceChange(
           `Expense updated to ${symbol}${parsedAmount.toFixed(decimals)}`
         );
@@ -297,9 +130,13 @@ const BudgetItem: React.FC<BudgetItemProps> = ({ budget }) => {
         {
           text: "Delete",
           style: "destructive",
-          onPress: () => {
-            deleteExpenseFromBudget(budget.id, rowId);
-            announceChange(`Deleted expense ${name}`);
+          onPress: async () => {
+            try {
+              await deleteExpenseFromBudget(budget.id, rowId);
+              announceChange(`Deleted expense ${name}`);
+            } catch {
+              Alert.alert("Unable to delete expense", "Your previous budget is unchanged. Please try again.");
+            }
           },
         },
       ],
@@ -307,30 +144,41 @@ const BudgetItem: React.FC<BudgetItemProps> = ({ budget }) => {
     );
   };
 
-  const reorderExpenses = useCallback(
-    (from: number, to: number) => {
-      if (from === to) return;
-      const next = [...bills];
-      const [moved] = next.splice(from, 1);
-      if (!moved) return;
-      next.splice(to, 0, moved);
-      updateExpenseOrder(budget.id, next);
-      announceChange("Expenses reordered successfully.");
-    },
-    [bills, budget.id, updateExpenseOrder]
-  );
-
   const dragY = useSharedValue(0);
   const activeIndex = useSharedValue(-1);
   const activeHeight = useSharedValue(0);
   const settled = useSharedValue(0);
 
+
+  const reorderExpenses = useCallback(
+    async (from: number, to: number) => {
+      if (from === to) return true;
+      const next = [...bills];
+      const [moved] = next.splice(from, 1);
+      if (!moved) return false;
+      next.splice(to, 0, moved);
+      try {
+        await updateExpenseOrder(budget.id, next);
+        announceChange("Expenses reordered successfully.");
+        return true;
+      } catch {
+        settled.set(0);
+        activeIndex.set(-1);
+        dragY.set(0);
+        Alert.alert("Unable to save order", "The previous order is unchanged. Please try again.");
+        return false;
+      }
+    },
+    [bills, budget.id, updateExpenseOrder, settled, activeIndex, dragY]
+  );
+
+
   useEffect(() => {
     if (!settled.value) return;
     const frame = requestAnimationFrame(() => {
-      settled.value = 0;
-      activeIndex.value = -1;
-      dragY.value = 0;
+      settled.set(0);
+      activeIndex.set(-1);
+      dragY.set(0);
     });
     return () => cancelAnimationFrame(frame);
   }, [activeIndex, bills, dragY, settled]);
@@ -348,8 +196,13 @@ const BudgetItem: React.FC<BudgetItemProps> = ({ budget }) => {
   const renderBill = (item: BudgetBill, index: number) => {
     const { id: rowId, expense, paid, amount } = item;
 
-    const togglePaid = () => {
-      toggleExpensePaid(budget.id, rowId, !paid);
+    const togglePaid = async () => {
+      try {
+        await toggleExpensePaid(budget.id, rowId, !paid);
+      } catch {
+        Alert.alert("Unable to save payment status", "The previous status is unchanged. Please try again.");
+        return;
+      }
       announceChange(
         `Expense ${expense.name} marked as ${
           paid ? "unpaid" : "paid"
@@ -360,6 +213,7 @@ const BudgetItem: React.FC<BudgetItemProps> = ({ budget }) => {
     return (
       <DraggableExpenseRow
         key={rowId}
+        expense={{ budgetId: budget.id, rowId, name: expense.name, amount }}
         index={index}
         count={bills.length}
         dragY={dragY}
@@ -374,26 +228,22 @@ const BudgetItem: React.FC<BudgetItemProps> = ({ budget }) => {
       >
         <View
           style={styles.expenseRow}
-          accessible={true}
-          accessibilityLabel={`Expense item: ${
-            expense.name
-          }, amount ${expense.amount.toFixed(2)}, ${paid ? "paid" : "not paid"}`}
-          accessibilityRole="adjustable"
+          accessible={false}
         >
         <View style={styles.deleteWrapper}>
           <TouchableOpacity
             onPress={() => confirmDelete(rowId, expense.name)}
             accessible={true}
             accessibilityLabel={`Delete ${expense.name}`}
+            accessibilityRole="button"
+            style={styles.iconButton}
           >
             <MaterialIcons name="delete" size={24} color={colorScheme.icon} />
           </TouchableOpacity>
         </View>
         <View
           style={styles.expenseItem}
-          accessible={true}
-          accessibilityLabel={`Drag handle for ${expense.name}`}
-          accessibilityHint="Long press and drag to reorder expenses"
+          accessible={false}
         >
           <View style={styles.expenseLeft}>
             <Text
@@ -461,11 +311,13 @@ const BudgetItem: React.FC<BudgetItemProps> = ({ budget }) => {
             </TouchableOpacity>
           )}
 
-          <TouchableOpacity onPress={togglePaid}>
+          <ExpenseActions budgetId={budget.id} bill={item} index={index} count={bills.length} onReorder={reorderExpenses} />
+          <TouchableOpacity onPress={togglePaid} style={styles.iconButton} accessibilityRole="checkbox"
+            accessibilityLabel={`Paid status for ${expense.name}`} accessibilityState={{ checked: paid }}>
             <MaterialIcons
               name={paid ? "check-circle" : "radio-button-unchecked"}
               size={24}
-              color={paid ? "#00FF7F" : "#AAAAAA"}
+              color={paid ? colorScheme.paidIcon : colorScheme.tabIconDefault}
               style={styles.paidIcon}
             />
           </TouchableOpacity>
@@ -473,6 +325,32 @@ const BudgetItem: React.FC<BudgetItemProps> = ({ budget }) => {
         </View>
       </DraggableExpenseRow>
     );
+  };
+
+  const openAddExpense = () => {
+    setDraftTitle("");
+    setDraftAmount("");
+    setDraftDate(new Date(budget.date));
+    setShowDraftDatePicker(false);
+    setAddingExpense(true);
+  };
+
+  const saveAddedExpense = async () => {
+    const title = draftTitle.trim();
+    const amount = parseFloat(draftAmount);
+    if (!title || !Number.isFinite(amount) || amount <= 0) {
+      Alert.alert("Add expense", "Enter a title, an amount, and a date.");
+      return;
+    }
+    try {
+      await addExpenseToBudget(budget.id, { name: title, amount, date: draftDate });
+    } catch {
+      Alert.alert("Unable to add expense", "Your previous budget is unchanged. Please try again.");
+      return;
+    }
+    announceChange(`Added ${title} to this budget.`);
+    setAddingExpense(false);
+    setShowDraftDatePicker(false);
   };
 
   const totalExpenses = bills.reduce((sum, { amount }) => sum + amount, 0);
@@ -508,6 +386,7 @@ const BudgetItem: React.FC<BudgetItemProps> = ({ budget }) => {
         {editingIncome ? (
           <TextInput
             ref={incomeInputRef}
+            accessibilityLabel={`Income amount for ${budget.income.name}`}
             placeholder="Enter amount"
             style={[styles.incomeInput, { color: colorScheme.text }]}
             keyboardType="decimal-pad"
@@ -517,7 +396,8 @@ const BudgetItem: React.FC<BudgetItemProps> = ({ budget }) => {
             onBlur={saveIncome}
           />
         ) : (
-          <TouchableOpacity onPress={handleEditIncome}>
+          <TouchableOpacity onPress={handleEditIncome} accessibilityRole="button"
+            accessibilityLabel={`Income amount for ${budget.income.name}, tap to edit`}>
             <Text
               style={[
                 styles.incomeAmount,
@@ -534,6 +414,101 @@ const BudgetItem: React.FC<BudgetItemProps> = ({ budget }) => {
       <View style={styles.expenseList}>
         {bills.map((item, index) => renderBill(item, index))}
       </View>
+
+      {addingExpense ? (
+        <View style={styles.addExpenseForm}>
+          <TextInput
+            placeholder="Title"
+            value={draftTitle}
+            onChangeText={setDraftTitle}
+            style={[
+              styles.addExpenseInput,
+              {
+                backgroundColor: colorScheme.cardBackground,
+                color: colorScheme.text,
+                borderColor: colorScheme.borderBottomColor,
+              },
+            ]}
+            placeholderTextColor={colorScheme.buttonBorder}
+            accessibilityLabel="Expense title"
+          />
+          <TextInput
+            placeholder="Amount"
+            value={draftAmount}
+            onChangeText={(text) => setDraftAmount(validateDecimalInput(text))}
+            keyboardType="decimal-pad"
+            style={[
+              styles.addExpenseInput,
+              {
+                backgroundColor: colorScheme.cardBackground,
+                color: colorScheme.text,
+                borderColor: colorScheme.borderBottomColor,
+              },
+            ]}
+            placeholderTextColor={colorScheme.buttonBorder}
+            accessibilityLabel="Expense amount"
+          />
+          <TouchableOpacity
+            onPress={() => setShowDraftDatePicker(true)}
+            style={[
+              styles.addExpenseInput,
+              {
+                backgroundColor: colorScheme.cardBackground,
+                borderColor: colorScheme.borderBottomColor,
+              },
+            ]}
+            accessibilityLabel="Expense date"
+          >
+            <Text style={{ color: colorScheme.text }}>
+              {draftDate.toDateString()}
+            </Text>
+          </TouchableOpacity>
+          {showDraftDatePicker && (
+            <DateTimePicker
+              value={draftDate}
+              mode="date"
+              onChange={(event, date) => {
+                if (event.type === "set" && date) setDraftDate(date);
+                setShowDraftDatePicker(false);
+              }}
+            />
+          )}
+          <View style={styles.addExpenseActions}>
+            <TouchableOpacity
+              onPress={() => {
+                setAddingExpense(false);
+                setShowDraftDatePicker(false);
+              }}
+              accessibilityLabel="Cancel adding expense"
+            >
+              <Text style={[styles.addExpenseCancel, { color: colorScheme.text }]}>
+                Cancel
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={saveAddedExpense}
+              style={[
+                styles.addExpenseSave,
+                { backgroundColor: colorScheme.submitButton },
+              ]}
+              accessibilityLabel="Save expense on this budget"
+            >
+              <Text style={{ color: colorScheme.buttonText }}>Save</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      ) : (
+        <TouchableOpacity
+          onPress={openAddExpense}
+          style={styles.addExpenseButton}
+          accessibilityLabel="Add an expense to this budget"
+        >
+          <MaterialIcons name="add" size={20} color={colorScheme.tabIconSelected} />
+          <Text style={[styles.addExpenseLabel, { color: colorScheme.tabIconSelected }]}>
+            Add expense
+          </Text>
+        </TouchableOpacity>
+      )}
 
       <View style={styles.summaryRow}>
         <Text style={[styles.summaryLabel, { color: colorScheme.text }]}>
@@ -562,7 +537,6 @@ const styles = StyleSheet.create({
   budgetContainer: {
     padding: 16,
     borderRadius: 10,
-    marginBottom: 16,
   },
   budgetHeader: {
     flexDirection: "row",
@@ -588,6 +562,7 @@ const styles = StyleSheet.create({
   label: {
     fontSize: 16,
   },
+  iconButton: { minWidth: 44, minHeight: 44, justifyContent: "center", alignItems: "center" },
   deleteWrapper: {
     justifyContent: "center",
     margin: 5,
@@ -635,6 +610,41 @@ const styles = StyleSheet.create({
   },
   paidIcon: {
     marginLeft: 8,
+  },
+  addExpenseButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "flex-start",
+    marginBottom: 16,
+  },
+  addExpenseLabel: {
+    fontSize: 16,
+    marginLeft: 4,
+  },
+  addExpenseForm: {
+    marginBottom: 16,
+  },
+  addExpenseInput: {
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 8,
+    fontSize: 16,
+  },
+  addExpenseActions: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    alignItems: "center",
+  },
+  addExpenseCancel: {
+    fontSize: 16,
+    marginRight: 16,
+  },
+  addExpenseSave: {
+    borderRadius: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
   },
   summaryRow: {
     flexDirection: "row",

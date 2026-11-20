@@ -1,7 +1,5 @@
 import { FrequencyInterface } from "../types/frequency";
 
-const MAX_STEPS = 5000;
-
 /** Calendar day in the local timezone, at local midnight. */
 export function toLocalDay(value: Date | string): Date {
   if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
@@ -90,6 +88,45 @@ function addDays(date: Date, days: number): Date {
   return toLocalDay(next);
 }
 
+/** Seek directly to a calendar occurrence without stepping through its history. */
+export function firstOccurrenceOnOrAfter(
+  anchorInput: Date | string,
+  frequency: FrequencyInterface | undefined,
+  startInput: Date
+): Date | null {
+  const anchor = toLocalDay(anchorInput);
+  const start = toLocalDay(startInput);
+  if (!Number.isFinite(anchor.getTime()) || !Number.isFinite(start.getTime())) return null;
+  if (anchor.getTime() >= start.getTime()) return anchor;
+  if (!frequency) return null;
+
+  if (frequency.unit === "semi-monthly") {
+    if (start.getDate() === 1) return start;
+    if (start.getDate() <= 15) return new Date(start.getFullYear(), start.getMonth(), 15);
+    return new Date(start.getFullYear(), start.getMonth() + 1, 1);
+  }
+  if (!Number.isFinite(frequency.value) || frequency.value <= 0) return null;
+
+  if (frequency.unit === "days" || frequency.unit === "weeks") {
+    const interval = Math.floor(frequency.value * (frequency.unit === "weeks" ? 7 : 1));
+    if (interval < 1) return null;
+    const steps = Math.ceil(calendarDaysBetween(anchor, start) / interval);
+    return addDays(anchor, steps * interval);
+  }
+  if (frequency.unit === "months") {
+    const interval = Math.floor(frequency.value);
+    if (interval < 1) return null;
+    const months = (start.getFullYear() - anchor.getFullYear()) * 12 + start.getMonth() - anchor.getMonth();
+    const steps = Math.floor(months / interval);
+    let current = addMonthsKeepingAnchorDay(anchor, steps * interval, anchor.getDate());
+    if (current.getTime() < start.getTime()) {
+      current = addMonthsKeepingAnchorDay(current, interval, anchor.getDate());
+    }
+    return current;
+  }
+  return null;
+}
+
 export function iterateOccurrences(
   anchorInput: Date | string,
   frequency: FrequencyInterface | undefined,
@@ -101,32 +138,10 @@ export function iterateOccurrences(
   const end = toLocalDay(rangeEnd);
   const dates: Date[] = [];
 
-  let current = anchor;
+  let current = firstOccurrenceOnOrAfter(anchor, frequency, start);
+  if (!current) return dates;
 
-  const intervalDays =
-    frequency?.unit === "days"
-      ? frequency.value
-      : frequency?.unit === "weeks"
-        ? frequency.value * 7
-        : 0;
-
-  if (
-    Number.isFinite(intervalDays) &&
-    intervalDays > 0 &&
-    current.getTime() < start.getTime()
-  ) {
-    const stepsToSkip = Math.floor(
-      calendarDaysBetween(current, start) / intervalDays
-    );
-    current = addDays(current, stepsToSkip * intervalDays);
-    if (current.getTime() < start.getTime()) {
-      current = addDays(current, intervalDays);
-    }
-  }
-
-  let steps = 0;
-
-  while (current.getTime() <= end.getTime() && steps < MAX_STEPS) {
+  while (current.getTime() <= end.getTime()) {
     if (current.getTime() >= start.getTime()) {
       dates.push(atLocalNoon(current));
     }
@@ -137,7 +152,6 @@ export function iterateOccurrences(
     if (!next || next.getTime() <= current.getTime()) break;
 
     current = next;
-    steps += 1;
   }
 
   return dates;

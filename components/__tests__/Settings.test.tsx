@@ -1,0 +1,27 @@
+import React from "react";
+import TestRenderer, { act } from "react-test-renderer";
+import Settings from "../../app/(tabs)/settings";
+import useBudgetStore from "../../store/useBudgetStore";
+jest.mock("../../store/useBudgetStore", () => ({ __esModule: true, default: jest.fn() }));
+jest.mock("react-native", () => ({ View: "View", Text: "Text", TouchableOpacity: "Button", StyleSheet: { create: (value: unknown) => value } }));
+it("saves the selected currency and toggles the current theme", async () => {
+  const saveCurrency = jest.fn().mockResolvedValue(undefined);
+  const saveTheme = jest.fn().mockResolvedValue(undefined);
+  jest.mocked(useBudgetStore).mockReturnValue({ settings: { currency: "CAD", theme: "dark" }, saveCurrency, saveTheme });
+  let root!: TestRenderer.ReactTestRenderer;
+  await act(async () => { root = TestRenderer.create(<Settings />); });
+  const buttons = () => root.root.findAll(node => String(node.type) === "Button");
+  const euro = buttons().find(button => button.findAll(node => String(node.type) === "Text" && node.children.join("") === "EUR").length)!;
+  expect(euro.props.accessibilityState.selected).toBe(false);
+  expect(buttons().find(button => button.props.accessibilityLabel === "Currency CAD")!.props.accessibilityState.selected).toBe(true);
+  await act(async () => { await euro.props.onPress(); await buttons().at(-1)!.props.onPress(); });
+  expect(saveCurrency).toHaveBeenCalledWith("EUR");
+  expect(saveTheme).toHaveBeenCalledWith("light");
+  jest.mocked(useBudgetStore).mockReturnValue({ settings: { currency: "EUR", theme: "light" }, saveCurrency, saveTheme });
+  await act(async () => root.update(<Settings />));
+  expect(buttons().find(button => button.props.accessibilityLabel === "Currency EUR")!.props.accessibilityState.selected).toBe(true);
+  expect(buttons().at(-1)!.props.accessibilityState.checked).toBe(false);
+  await act(async () => { await buttons().at(-1)!.props.onPress(); });
+  expect(saveTheme).toHaveBeenLastCalledWith("dark");
+  await act(async () => root.unmount());
+});

@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
+import React from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
 import { Colors } from "../../constants/Colors";
@@ -8,29 +9,24 @@ const currencies = ["USD", "EUR", "GBP", "JPY", "CAD"] as const;
 type CurrencyType = (typeof currencies)[number];
 
 const Settings: React.FC = () => {
-  const { settings, saveCurrency, saveTheme } = useBudgetStore();
+  const { settings, saveCurrency, saveTheme } = useBudgetStore(
+    useShallow(state => ({
+      settings: state.settings,
+      saveCurrency: state.saveCurrency,
+      saveTheme: state.saveTheme,
+    }))
+  );
   const colorScheme = settings?.theme === "dark" ? Colors.dark : Colors.light;
 
-  const [currency, setCurrency] = useState("CAD");
-  const [theme, setTheme] = useState<"light" | "dark">("light");
-
-  useEffect(() => {
-    if (settings?.currency) {
-      setCurrency(settings.currency);
-    }
-    if (settings?.theme) {
-      setTheme(settings.theme);
-    }
-  }, [settings]);
+  const currency = settings?.currency ?? "CAD";
+  const theme = settings?.theme ?? "light";
 
   const handleCurrencyChange = async (newCurrency: CurrencyType) => {
-    setCurrency(newCurrency);
     await saveCurrency(newCurrency);
   };
 
   const toggleTheme = async () => {
     const newTheme = theme === "light" ? "dark" : "light";
-    setTheme(newTheme);
     await saveTheme(newTheme);
   };
 
@@ -48,6 +44,9 @@ const Settings: React.FC = () => {
         {currencies.map((curr) => (
           <TouchableOpacity
             key={curr}
+            accessibilityRole="button"
+            accessibilityLabel={`Currency ${curr}`}
+            accessibilityState={{ selected: currency === curr }}
             style={[
               styles.currencyButton,
               {
@@ -88,6 +87,9 @@ const Settings: React.FC = () => {
           { backgroundColor: colorScheme.submitButton },
         ]}
         onPress={toggleTheme}
+        accessibilityRole="switch"
+        accessibilityLabel="Dark mode"
+        accessibilityState={{ checked: theme === "dark" }}
       >
         <Text style={[styles.themeText, { color: colorScheme.buttonText }]}>
           {theme === "light" ? "🌞 Light Mode" : "🌙 Dark Mode"}

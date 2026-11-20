@@ -1,76 +1,61 @@
-import { Platform } from "react-native";
+import { createMutationQueue } from "./mutationQueue";
+import { normalizeMoneyAmount } from "../utils/money";
 import uuid from "react-native-uuid";
 import { create } from "zustand";
 
 import {
-  addOrUpdateBudget,
-  addOrUpdateExpense,
-  addOrUpdateIncome,
-  clearAllBudgets,
-  deleteBudget,
-  deleteExpense,
-  deleteExpenseFromBudgetInDB,
-  deleteIncome,
-  dismissBudgetExpense,
+  type ForecastSeriesChange,
   getBudgets,
+  getUnfundedExpenses,
   getDismissedBudgetExpenseKeys,
   getExpenses,
   getIncomes,
-  getPaidStatusFromDB,
   getSettings,
-  moveExpenseBetweenBudgetsInDB,
+  replaceAllBudgets,
   setPaidStatusInDB,
   setupDatabase,
   updateCurrency,
-  updateExpenseAmountInDB,
   updateExpenseOrderInDB,
-  updateIncomeAmountInDB,
   updateTheme,
 } from "../database/database";
 
-import { StoredBudget } from "../types/budget";
+import { StoredBudget, UnfundedExpense } from "../types/budget";
 import { ExpenseInterface } from "../types/expense";
 import { IncomeInterface } from "../types/income";
-import { SettingsInterface } from "../types/settings";
+import { currencySettings, SettingsInterface } from "../types/settings";
 import {
   BudgetAmountChanges,
-  buildBudgets,
+  buildBudgetForecast,
   getBudgetPeriod,
+  getBudgetCalculationStart,
+  isManualBudgetExpense,
+  manualExpenseId,
+  expenseOccurrenceKey,
 } from "../utils/buildBudgets";
+import { atLocalNoon } from "../utils/occurrenceDates";
 import { normalizeFrequency } from "../utils/normalizeFrequency";
-
-// Expo's web server renderer imports this module. Opening SQLite there tries
-// to attach browser devtools and throws because window does not exist.
-if (Platform.OS !== "web") {
-  setupDatabase();
-}
 
 interface BudgetState {
   incomes: IncomeInterface[];
   expenses: ExpenseInterface[];
   budgets: StoredBudget[];
+  unfundedExpenses: UnfundedExpense[];
   settings: SettingsInterface | null;
   loading: boolean;
+  loadError: string | null;
   selectedMonth: number;
   selectedYear: number;
-  generateAndSaveBudgets: () => Promise<void>;
   refreshBudgets: () => Promise<void>;
-  setIncomes: (incomes: IncomeInterface[]) => void;
-  setExpenses: (expenses: ExpenseInterface[]) => void;
-  setBudgets: (budgets: StoredBudget[]) => void;
-  setSettings: (settings: SettingsInterface) => void;
-  setLoading: (loading: boolean) => void;
   setSelectedMonth: (month: number) => void;
   setSelectedYear: (year: number) => void;
-  saveCurrency: (currency: "USD" | "EUR" | "GBP" | "JPY" | "CAD") => void;
-  saveTheme: (theme: "light" | "dark") => void;
+  saveCurrency: (currency: "USD" | "EUR" | "GBP" | "JPY" | "CAD") => Promise<void>;
+  saveTheme: (theme: "light" | "dark") => Promise<void>;
   fetchAndCleanBudgets: () => Promise<void>;
   getExpenses: () => Promise<void>;
   addOrUpdateIncome: (incomeForm: Partial<IncomeInterface>) => Promise<void>;
   addOrUpdateExpense: (expenseForm: Partial<ExpenseInterface>) => Promise<void>;
   deleteIncome: (id: string) => Promise<void>;
   deleteExpense: (id: string) => Promise<void>;
-  deleteBudget: (id: string) => Promise<void>;
   updateIncomeAmount: (budgetId: string, newAmount: number) => Promise<void>;
   updateExpenseAmount: (
     budgetId: string,
@@ -84,426 +69,315 @@ interface BudgetState {
   ) => Promise<void>;
   moveExpenseBetweenBudgets: (
     fromBudgetId: string,
-    expenseId: string,
     toBudgetId: string,
+    expenseId: string,
     rowId: string,
     amount: number
   ) => Promise<void>;
-  setPaidStatusInStorage: (
-    budgetId: string,
-    rowId: string,
-    isPaid: boolean
-  ) => Promise<void>;
-  getPaidStatusFromStorage: (
-    budgetId: string,
-    rowId: string
-  ) => Promise<boolean>;
   deleteExpenseFromBudget: (id: string, budgetId: string) => Promise<void>;
+  addExpenseToBudget: (
+    budgetId: string,
+    expense: { name: string; amount: number; date: Date }
+  ) => Promise<void>;
   updateExpenseOrder: (
     budgetId: string,
     newOrder: StoredBudget["bills"]
   ) => Promise<void>;
 }
 
+function updateSeries<T extends { id: string }>(items: T[], updated: T): T[] {
+  return items.some((item) => item.id === updated.id)
+    ? items.map((item) => item.id === updated.id ? updated : item)
+    : [...items, updated];
+}
+
+interface RebuildBudgetOptions {
+  amountChanges?: BudgetAmountChanges;
+  seriesChange?: ForecastSeriesChange;
+  occurrenceBudgets?: StoredBudget[];
+}
+
 const rebuildBudgets = async (
   get: () => BudgetState,
   set: (partial: Partial<BudgetState>) => void,
-  amountChanges?: BudgetAmountChanges
+  options: RebuildBudgetOptions = {}
 ) => {
+  const { amountChanges, seriesChange, occurrenceBudgets } = options;
   await setupDatabase();
-  const { incomes, expenses, budgets } = get();
-  const { start, end } = getBudgetPeriod();
-  const dismissedExpenseKeys = await getDismissedBudgetExpenseKeys();
-  const nextBudgets = buildBudgets(
+  const current = get();
+  const { unfundedExpenses } = current;
+  const budgets = occurrenceBudgets ?? current.budgets;
+  const incomes = (seriesChange?.income ? updateSeries(current.incomes, seriesChange.income) : current.incomes)
+    .filter(item => item.id !== seriesChange?.deleteIncomeId);
+  const expenses = (seriesChange?.expense ? updateSeries(current.expenses, seriesChange.expense) : current.expenses)
+    .filter(item => item.id !== seriesChange?.deleteExpenseId);
+  const { start, end } = getBudgetPeriod(new Date(), incomes);
+  const dismissedExpenseKeys = [...await getDismissedBudgetExpenseKeys()];
+  if (seriesChange?.dismissExpense) {
+    dismissedExpenseKeys.push(expenseOccurrenceKey(seriesChange.dismissExpense.id, seriesChange.dismissExpense.date));
+  }
+  const forecast = buildBudgetForecast(
     incomes,
     expenses,
-    start,
+    getBudgetCalculationStart(start, incomes, budgets ?? []),
     end,
     budgets ?? [],
     amountChanges,
-    dismissedExpenseKeys
+    dismissedExpenseKeys,
+    unfundedExpenses
   );
 
-  await clearAllBudgets();
+  await replaceAllBudgets(forecast.budgets, forecast.unfundedExpenses, seriesChange, {
+    budgets: current.budgets, unfundedExpenses: current.unfundedExpenses,
+  });
 
-  for (const budget of nextBudgets) {
-    try {
-      await addOrUpdateBudget(budget);
-    } catch (error) {
-      console.error("Error saving budget:", error);
-    }
-  }
-
-  set({ budgets: nextBudgets });
+  // Publish the source records and their forecast only after the shared commit.
+  set({ ...forecast, incomes, expenses });
 };
 
-const useBudgetStore = create<BudgetState>((set, get) => ({
-  incomes: [],
-  expenses: [],
-  budgets: [],
-  settings: {
-    theme: "dark",
-    currency: "CAD",
-  } as SettingsInterface,
-  loading: false,
-  selectedMonth: new Date().getMonth() + 1,
-  selectedYear: new Date().getFullYear(),
-
-  setIncomes: (incomes) => set({ incomes }),
-  setExpenses: (expenses) => set({ expenses }),
-  setBudgets: (budgets) => set({ budgets }),
-  setSettings: (settings) => set({ settings }),
-  setLoading: (loading) => set({ loading }),
-  setSelectedMonth: (month) => set({ selectedMonth: month }),
-  setSelectedYear: (year) => set({ selectedYear: year }),
-
-  generateAndSaveBudgets: async () => {
+/** Shared by startup and refresh retries; never interpret a read failure as empty data. */
+async function loadSavedBudgets(get: () => BudgetState, set: (partial: Partial<BudgetState>) => void) {
+  set({ loading: true });
+  try {
+    await setupDatabase();
+    const incomes = await getIncomes();
+    const expenses = await getExpenses();
+    const budgets = await getBudgets();
+    const unfundedExpenses = await getUnfundedExpenses();
+    const settings = await getSettings();
+    set({ incomes, expenses, budgets, unfundedExpenses, settings });
     await rebuildBudgets(get, set);
-  },
+    set({ loadError: null });
+  } catch (error) {
+    set({ loadError: "Unable to load saved budgets. Refresh to try again." });
+    throw error;
+  } finally {
+    set({ loading: false });
+  }
+}
 
-  refreshBudgets: async () => {
-    try {
-      await rebuildBudgets(get, set);
-    } catch (e) {
-      console.error("ERROR", e);
-    }
-  },
+async function persistPaidStatus(
+  get: () => BudgetState,
+  set: (partial: Partial<BudgetState>) => void,
+  budgetId: string,
+  rowId: string,
+  paid: boolean
+) {
+  const current = get().budgets.find(budget => budget.id === budgetId);
+  if (!current?.bills.some(bill => bill.id === rowId)) throw new Error("Expense occurrence not found");
+  await setPaidStatusInDB(budgetId, rowId, paid);
+  set({ budgets: get().budgets.map(budget => budget.id === budgetId
+    ? { ...budget, bills: budget.bills.map(bill => bill.id === rowId ? { ...bill, paid } : bill) }
+    : budget) });
+}
 
-  fetchAndCleanBudgets: async () => {
-    set({ loading: true });
-    try {
+const useBudgetStore = create<BudgetState>((set, get) => {
+  const queue = createMutationQueue();
+  const state: BudgetState = {
+    incomes: [],
+    expenses: [],
+    budgets: [],
+    unfundedExpenses: [],
+    settings: {
+      theme: "dark",
+      currency: "CAD",
+    } as SettingsInterface,
+    loading: false,
+    loadError: null,
+    selectedMonth: new Date().getMonth() + 1,
+    selectedYear: new Date().getFullYear(),
+
+    setSelectedMonth: (month) => set({ selectedMonth: month }),
+    setSelectedYear: (year) => set({ selectedYear: year }),
+
+    refreshBudgets: queue(async () => {
+      if (get().loadError) await loadSavedBudgets(get, set);
+      else await rebuildBudgets(get, set);
+    }),
+
+    fetchAndCleanBudgets: queue(async () => {
+      await loadSavedBudgets(get, set);
+    }),
+
+    getExpenses: queue(async () => {
       await setupDatabase();
-      const incomes = await getIncomes();
-      const expenses = await getExpenses();
-      const budgets = await getBudgets();
-      const settings = await getSettings();
-
-      set({ incomes, expenses, budgets: budgets ?? [], settings });
-      await rebuildBudgets(get, set);
-    } catch (error) {
-      console.error("❌ Error loading budgets:", error);
-    } finally {
-      set({ loading: false });
-    }
-  },
-
-  getExpenses: async () => {
-    try {
       const expenses = await getExpenses();
       set({ expenses });
-    } catch (e) {
-      console.error("Failed to load expenses", e);
-    }
-  },
+    }),
 
-  addOrUpdateIncome: async (incomeForm) => {
-    const income: IncomeInterface = {
-      id: incomeForm.id ?? uuid.v4().toString(),
-      name: incomeForm.name!,
-      date: incomeForm.date!,
-      amount: incomeForm.amount!,
-      frequency: normalizeFrequency(incomeForm.frequency),
-    };
-    const previous = get().incomes.find((item) => item.id === income.id);
-
-    await addOrUpdateIncome(income);
-    const currentIncomes = get().incomes;
-    const incomeExists = currentIncomes.some((item) => item.id === income.id);
-    set({
-      incomes: incomeExists
-        ? currentIncomes.map((item) => (item.id === income.id ? income : item))
-        : [...currentIncomes, income],
-    });
-    await rebuildBudgets(
-      get,
-      set,
-      previous
-        ? { income: { id: income.id, previousAmount: previous.amount } }
-        : undefined
-    );
-  },
-
-  addOrUpdateExpense: async (expenseForm) => {
-    const expense: ExpenseInterface = {
-      id: expenseForm.id ?? uuid.v4().toString(),
-      name: expenseForm.name!,
-      date: expenseForm.date!,
-      amount: expenseForm.amount!,
-      frequency: normalizeFrequency(expenseForm.frequency),
-    };
-    const previous = get().expenses.find((item) => item.id === expense.id);
-
-    await addOrUpdateExpense(expense);
-
-    const currentExpenses = get().expenses;
-    const expenseExists = currentExpenses.some((item) => item.id === expense.id);
-    set({
-      expenses: expenseExists
-        ? currentExpenses.map((item) =>
-            item.id === expense.id ? expense : item
-          )
-        : [...currentExpenses, expense],
-    });
-    await rebuildBudgets(
-      get,
-      set,
-      previous
-        ? { expense: { id: expense.id, previousAmount: previous.amount } }
-        : undefined
-    );
-  },
-
-  deleteIncome: async (id) => {
-    await deleteIncome(id);
-    set({ incomes: get().incomes.filter((income) => income.id !== id) });
-    await get().refreshBudgets();
-  },
-
-  deleteExpense: async (id) => {
-    await deleteExpense(id);
-    set({ expenses: get().expenses.filter((expense) => expense.id !== id) });
-    await get().refreshBudgets();
-  },
-
-  deleteBudget: async (id) => {
-    await deleteBudget(id);
-
-    set({ budgets: get().budgets.filter((budget) => budget.id !== id) });
-  },
-
-  deleteExpenseFromBudget: async (budgetId, id) => {
-    const currentBudgets = get().budgets;
-    const removedBill = currentBudgets
-      .find((budget) => budget.id === budgetId)
-      ?.bills.find((bill) => bill.id === id);
-    try {
-      if (removedBill?.expense?.id) {
-        await dismissBudgetExpense(removedBill.expense.id, removedBill.expense.date);
-      }
-      // Optimistically update state first to avoid flicker
-      const updatedBudgets = currentBudgets.map((budget) =>
-        budget.id === budgetId
-          ? {
-              ...budget,
-              bills: budget.bills.filter((bill) => bill.id !== id),
-              remainingBalance:
-                budget.amount -
-                budget.bills
-                  .filter((bill) => bill.id !== id)
-                  .reduce((sum, b) => sum + b.amount, 0),
-            }
-          : budget
-      );
-
-      set({ budgets: updatedBudgets });
-      // Then update database
-      await deleteExpenseFromBudgetInDB(id, budgetId);
-    } catch (e) {
-      console.error(e);
-      // On error, reload from database
-      const budgets = await getBudgets();
-      set({ budgets });
-    }
-  },
-
-  updateExpenseOrder: async (
-    budgetId: string,
-    newOrder: StoredBudget["bills"]
-  ) => {
-    const currentBudgets = get().budgets;
-    // Optimistically update state first to avoid flicker
-    const updatedBudgets = currentBudgets.map((budget) =>
-      budget.id === budgetId
-        ? {
-            ...budget,
-            bills: newOrder.map((bill, i) => ({
-              ...bill,
-              sort_order: i,
-            })),
-          }
-        : budget
-    );
-
-    set({ budgets: updatedBudgets });
-    // Then update database
-    await updateExpenseOrderInDB(
-      budgetId,
-      newOrder.map((bill) => ({ id: bill.id }))
-    );
-  },
-
-  updateIncomeAmount: async (budgetId, newAmount) => {
-    try {
-      const updatedBudgets = get().budgets.map((budget) =>
-        budget.id === budgetId
-          ? {
-              ...budget,
-              amount: newAmount,
-              income: {
-                ...budget.income,
-                amount: newAmount,
-              },
-              remainingBalance:
-                newAmount - budget.bills.reduce((sum, bill) => sum + bill.amount, 0),
-            }
-          : budget
-      );
-
-      set({ budgets: updatedBudgets });
-      await updateIncomeAmountInDB(budgetId, newAmount);
-    } catch (error) {
-      console.error(error);
-      const budgets = await getBudgets();
-      set({ budgets });
-    }
-  },
-
-  updateExpenseAmount: async (budgetId, rowId, newAmount) => {
-    try {
-      const updatedBudgets = get().budgets.map((budget) =>
-        budget.id === budgetId
-          ? {
-              ...budget,
-              bills: budget.bills.map((bill) =>
-                bill.id === rowId
-                  ? {
-                      ...bill,
-                      amount: newAmount,
-                      expense: {
-                        ...bill.expense,
-                        amount: newAmount,
-                      },
-                    }
-                  : bill
-              ),
-              remainingBalance:
-                budget.amount -
-                budget.bills.reduce(
-                  (sum, bill) =>
-                    bill.id === rowId ? sum + newAmount : sum + bill.amount,
-                  0
-                ),
-            }
-          : budget
-      );
-
-      set({ budgets: updatedBudgets });
-      await updateExpenseAmountInDB(budgetId, rowId, newAmount);
-    } catch (error) {
-      console.error(error);
-      const budgets = await getBudgets();
-      set({ budgets });
-    }
-  },
-
-  setPaidStatusInStorage: async (budgetId, rowId, isPaid) => {
-    await setPaidStatusInDB(budgetId, rowId, isPaid);
-
-    set({
-      budgets: get().budgets,
-    });
-  },
-
-  getPaidStatusFromStorage: async (budgetId, rowId) => {
-    return await getPaidStatusFromDB(budgetId, rowId);
-  },
-
-  toggleExpensePaid: async (budgetId, rowId, isPaid) => {
-    const currentBudgets = get().budgets;
-    // Optimistically update state first to avoid flicker
-    const updatedBudgets = currentBudgets.map((budget) => {
-      const isTargetBudget = budget.id === budgetId;
-
-      if (!isTargetBudget) return budget;
-
-      const updatedBills = budget.bills.map((bill) => {
-        const isTargetBill = bill.id === rowId;
-
-        if (isTargetBill) {
-          return { ...bill, paid: isPaid };
-        }
-
-        return bill;
-      });
-
-      return {
-        ...budget,
-        bills: updatedBills,
+    addOrUpdateIncome: queue(async (incomeForm) => {
+      const income: IncomeInterface = {
+        id: incomeForm.id ?? uuid.v4().toString(),
+        name: incomeForm.name!,
+        date: incomeForm.date!,
+        amount: normalizeMoneyAmount(incomeForm.amount!, currencySettings[get().settings?.currency ?? "CAD"]?.decimals ?? 2),
+        frequency: normalizeFrequency(incomeForm.frequency),
       };
-    });
+      const previous = get().incomes.find((item) => item.id === income.id);
 
-    set({ budgets: updatedBudgets });
-    // Then update database
-    await setPaidStatusInDB(budgetId, rowId, isPaid);
-  },
+      await rebuildBudgets(
+        get,
+        set,
+        {
+          amountChanges: previous
+            ? { income: { id: income.id, previousAmount: previous.amount } }
+            : undefined,
+          seriesChange: { income },
+        }
+      );
+    }),
 
-  moveExpenseBetweenBudgets: async (
-    fromBudgetId,
-    toBudgetId,
-    expenseId,
-    rowId,
-    amount
-  ) => {
-    await moveExpenseBetweenBudgetsInDB(
+    addOrUpdateExpense: queue(async (expenseForm) => {
+      const expense: ExpenseInterface = {
+        id: expenseForm.id ?? uuid.v4().toString(),
+        name: expenseForm.name!,
+        date: expenseForm.date!,
+        amount: normalizeMoneyAmount(expenseForm.amount!, currencySettings[get().settings?.currency ?? "CAD"]?.decimals ?? 2),
+        frequency: normalizeFrequency(expenseForm.frequency),
+      };
+      const previous = get().expenses.find((item) => item.id === expense.id);
+
+      await rebuildBudgets(
+        get,
+        set,
+        {
+          amountChanges: previous
+            ? { expense: { id: expense.id, previousAmount: previous.amount } }
+            : undefined,
+          seriesChange: { expense },
+        }
+      );
+    }),
+
+    deleteIncome: queue(async (id) => {
+      await rebuildBudgets(get, set, { seriesChange: { deleteIncomeId: id } });
+    }),
+
+    deleteExpense: queue(async (id) => {
+      await rebuildBudgets(get, set, { seriesChange: { deleteExpenseId: id } });
+    }),
+
+    deleteExpenseFromBudget: queue(async (budgetId, id) => {
+      const current = get().budgets.find(budget => budget.id === budgetId);
+      const removed = current?.bills.find(bill => bill.id === id);
+      if (!removed) throw new Error("Expense occurrence not found");
+      const updated = get().budgets.map(budget => budget.id === budgetId
+        ? { ...budget, bills: budget.bills.filter(bill => bill.id !== id) }
+        : budget);
+      const change = isManualBudgetExpense(removed.expense.id) ? undefined
+        : { dismissExpense: { id: removed.expense.id, date: removed.expense.date } };
+      await rebuildBudgets(get, set, { seriesChange: change, occurrenceBudgets: updated });
+    }),
+
+    addExpenseToBudget: queue(async (budgetId, { name, amount, date }) => {
+      const title = name.trim();
+      amount = normalizeMoneyAmount(amount, currencySettings[get().settings?.currency ?? "CAD"]?.decimals ?? 2);
+      if (!title || !Number.isFinite(amount) || amount <= 0 || !Number.isFinite(date?.getTime())) {
+        throw new Error("Enter a valid name, amount and date");
+      }
+      const current = get().budgets.find(budget => budget.id === budgetId);
+      if (!current) throw new Error("Budget not found");
+      const id = String(uuid.v4());
+      const bill: StoredBudget["bills"][number] = {
+        id, amount, paid: false, sort_order: current.bills.length,
+        expense: { id: manualExpenseId(id), name: title, date: atLocalNoon(date), amount, frequency: undefined },
+      };
+      const updated = get().budgets.map(budget => budget.id === budgetId
+        ? { ...budget, bills: [...budget.bills, bill] }
+        : budget);
+      await rebuildBudgets(get, set, { occurrenceBudgets: updated });
+    }),
+
+    updateExpenseOrder: queue(async (budgetId, newOrder) => {
+      const current = get().budgets.find(budget => budget.id === budgetId);
+      const ids = new Set(newOrder.map(bill => bill.id));
+      if (!current || current.bills.length !== newOrder.length || ids.size !== newOrder.length || current.bills.some(bill => !ids.has(bill.id))) {
+        throw new Error("Expense order is stale; please refresh");
+      }
+      const byId = new Map(current.bills.map(bill => [bill.id, bill]));
+      const bills = newOrder.map((bill, index) => ({ ...byId.get(bill.id)!, sort_order: index }));
+      await updateExpenseOrderInDB(budgetId, bills.map(bill => ({ id: bill.id })));
+      set({ budgets: get().budgets.map(budget => budget.id === budgetId ? { ...budget, bills } : budget) });
+    }),
+
+    updateIncomeAmount: queue(async (budgetId, newAmount) => {
+      newAmount = normalizeMoneyAmount(newAmount, currencySettings[get().settings?.currency ?? "CAD"]?.decimals ?? 2);
+      if (!get().budgets.some(budget => budget.id === budgetId)) throw new Error("Budget not found");
+      const updated = get().budgets.map(budget => budget.id === budgetId
+        ? { ...budget, amount: newAmount, amountOverride: true, income: { ...budget.income, amount: newAmount } }
+        : budget);
+      await rebuildBudgets(get, set, { occurrenceBudgets: updated });
+    }),
+
+    updateExpenseAmount: queue(async (budgetId, rowId, newAmount) => {
+      newAmount = normalizeMoneyAmount(newAmount, currencySettings[get().settings?.currency ?? "CAD"]?.decimals ?? 2);
+      const current = get().budgets.find(budget => budget.id === budgetId);
+      if (!current?.bills.some(bill => bill.id === rowId)) throw new Error("Expense occurrence not found");
+      const updated = get().budgets.map(budget => budget.id === budgetId
+        ? { ...budget, bills: budget.bills.map(bill => bill.id === rowId
+          ? { ...bill, amount: newAmount, amountOverride: true, expense: { ...bill.expense, amount: newAmount } }
+          : bill) }
+        : budget);
+      await rebuildBudgets(get, set, { occurrenceBudgets: updated });
+    }),
+
+    toggleExpensePaid: queue(async (budgetId, rowId, isPaid) => {
+      await persistPaidStatus(get, set, budgetId, rowId, isPaid);
+    }),
+
+    moveExpenseBetweenBudgets: queue(async (
       fromBudgetId,
-      expenseId,
       toBudgetId,
+      expenseId,
       rowId,
       amount
-    );
-    set({
-      budgets: get().budgets.map((budget) => {
-        if (budget.id === fromBudgetId) {
-          return {
-            ...budget,
-            bills: budget.bills.filter((bill) => bill.id !== rowId),
-          };
-        }
-        if (budget.id === toBudgetId) {
-          const movedExpense = get().expenses.find(
-            (expense) => expense.id === expenseId
-          );
-          if (!movedExpense) return budget;
-          return {
-            ...budget,
-            bills: [
-              ...budget.bills,
-              {
-                id: rowId,
-                expense: movedExpense,
-                paid: false,
-                amount: amount,
-                sort_order: budget.bills.length,
-              },
-            ],
-          };
-        }
+    ) => {
+      if (fromBudgetId === toBudgetId) return;
+      const movedBill = get().budgets
+        .find((budget) => budget.id === fromBudgetId)
+        ?.bills.find((bill) => bill.id === rowId && bill.expense.id === expenseId);
+      const destination = get().budgets.find((budget) => budget.id === toBudgetId);
+      if (!movedBill || !destination) throw new Error("Source expense or destination budget not found");
+
+      amount = normalizeMoneyAmount(amount, currencySettings[get().settings?.currency ?? "CAD"]?.decimals ?? 2);
+      const updated = get().budgets.map(budget => {
+        if (budget.id === fromBudgetId) return { ...budget, bills: budget.bills.filter(bill => bill.id !== rowId) };
+        if (budget.id === toBudgetId) return {
+          ...budget,
+          bills: [...budget.bills, {
+            ...movedBill, assignmentOverride: true,
+            amountOverride: movedBill.amountOverride || amount !== movedBill.amount,
+            amount, expense: { ...movedBill.expense, amount }, sort_order: budget.bills.length,
+          }],
+        };
         return budget;
-      }),
-    });
-  },
-
-  saveCurrency: async (currency) => {
-    try {
-      await updateCurrency(currency);
-      set({
-        settings: { currency, theme: get().settings?.theme ?? "dark" },
       });
-    } catch (e) {
-      console.error("ERROR saving currency", e);
-    }
-  },
+      await rebuildBudgets(get, set, { occurrenceBudgets: updated });
+    }),
 
-  saveTheme: async (theme) => {
-    try {
-      await updateTheme(theme);
-      set({
-        settings: { theme, currency: get().settings?.currency ?? "CAD" },
-      });
-    } catch (e) {
-      console.error("ERROR saving theme", e);
-    }
-  },
-}));
+    saveCurrency: queue(async (currency) => {
+      try {
+        await updateCurrency(currency);
+        set({
+          settings: { currency, theme: get().settings?.theme ?? "dark" },
+        });
+      } catch (e) {
+        console.error("ERROR saving currency", e);
+      }
+    }),
+
+    saveTheme: queue(async (theme) => {
+      try {
+        await updateTheme(theme);
+        set({
+          settings: { theme, currency: get().settings?.currency ?? "CAD" },
+        });
+      } catch (e) {
+        console.error("ERROR saving theme", e);
+      }
+    }),
+  };
+  return state;
+});
 
 export default useBudgetStore;

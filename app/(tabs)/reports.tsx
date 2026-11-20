@@ -1,7 +1,10 @@
+import { useShallow } from "zustand/react/shallow";
+import { buildReportHtml } from "../../utils/reportHtml";
+import { groupReportExpenses, summarizeReportExpenses, summarizeReportIncome } from "../../utils/reportExpenses";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { printToFileAsync } from "expo-print";
 import * as Sharing from "expo-sharing";
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import {
   Alert,
   Dimensions,
@@ -14,20 +17,6 @@ import {
 import { BarChart, PieChart } from "react-native-chart-kit";
 import { KeyboardAwareScrollView } from "react-native-keyboard-aware-scroll-view";
 
-let FileSystem: any = null;
-let IntentLauncher: any = null;
-
-try {
-  // @ts-ignore - Native modules may not be available in all environments
-  FileSystem = require("expo-file-system/legacy");
-  // @ts-ignore
-  IntentLauncher = require("expo-intent-launcher");
-} catch (e) {
-  // Native modules not available (e.g., in Expo Go)
-  FileSystem = null;
-  IntentLauncher = null;
-}
-
 import { Colors } from "../../constants/Colors";
 import { currencySettings } from "../../types/settings";
 import { generateRandomColor } from "../../utils/generateRandomColor";
@@ -35,10 +24,26 @@ import { getFirstAndLastDayOfMonth } from "../../utils/getFirstAndLast";
 import { toLocalDay } from "../../utils/occurrenceDates";
 import useBudgetStore from "../../store/useBudgetStore";
 
+async function loadExportModules() {
+  try {
+    const FileSystem = await import("expo-file-system/legacy");
+    const IntentLauncher = await import("expo-intent-launcher");
+    return { FileSystem, IntentLauncher };
+  } catch {
+    return { FileSystem: null, IntentLauncher: null };
+  }
+}
+
 const screenWidth = Dimensions.get("window").width;
 
 const Reports: React.FC = () => {
-  const { budgets, settings } = useBudgetStore();
+  const { budgets, unfundedExpenses, settings } = useBudgetStore(
+    useShallow(state => ({
+      budgets: state.budgets,
+      unfundedExpenses: state.unfundedExpenses,
+      settings: state.settings,
+    }))
+  );
   const { symbol, decimals } = currencySettings[settings?.currency || "CAD"];
   const colorScheme = settings?.theme === "dark" ? Colors.dark : Colors.light;
 
@@ -47,7 +52,7 @@ const Reports: React.FC = () => {
   const [endDate, setEndDate] = useState<Date | null>(lastDay);
   const [showStartPicker, setShowStartPicker] = useState(false);
   const [showEndPicker, setShowEndPicker] = useState(false);
-  const [filtersApplied, setFiltersApplied] = useState(false);
+  const filtersApplied = startDate !== null && endDate !== null;
 
   const filteredBudgets = budgets.filter((budget) => {
     const budgetDay = toLocalDay(budget.date).getTime();
@@ -59,63 +64,18 @@ const Reports: React.FC = () => {
     );
   });
 
-  useEffect(() => {
-    if (startDate && endDate) {
-      setFiltersApplied(true);
-    }
-  }, [startDate, endDate]);
+  const { totalIncome, incomeBreakdown } = summarizeReportIncome(filteredBudgets);
 
-  const totalIncome = filteredBudgets.reduce(
-    (sum, budget) => sum + budget.income.amount,
-    0
+  const { unfunded, expenseCount, totalUnfunded, totalExpenses, expenseBreakdown } = summarizeReportExpenses(
+    budgets, unfundedExpenses, startDate, endDate
   );
-
-  const incomeBreakdown = filteredBudgets.reduce((acc, budget) => {
-    acc[budget.income.name] =
-      (acc[budget.income.name] || 0) + budget.income.amount;
-    return acc;
-  }, {} as Record<string, number>);
-
-  const totalExpenses = filteredBudgets.reduce(
-    (sum, budget) =>
-      sum +
-      budget.bills.reduce((billSum, bill) => billSum + bill.expense.amount, 0),
-    0
-  );
-
-  const expenseBreakdown = filteredBudgets.reduce((acc, budget) => {
-    budget.bills.forEach(({ expense }) => {
-      acc[expense.name] = (acc[expense.name] || 0) + expense.amount;
-    });
-    return acc;
-  }, {} as Record<string, number>);
 
   const incomeChartData = {
     labels: Object.keys(incomeBreakdown),
     datasets: [{ data: Object.values(incomeBreakdown) }],
   };
 
-  const totalAmount = Object.values(expenseBreakdown).reduce(
-    (sum, val) => sum + val,
-    0
-  );
-
-  // Group expenses: combine those below 5% into "Other"
-  const groupedExpenseBreakdown: Record<string, number> = {};
-  let otherTotal = 0;
-
-  for (const [name, amount] of Object.entries(expenseBreakdown)) {
-    const percentage = totalAmount > 0 ? amount / totalAmount : 0;
-    if (percentage < 0.05) {
-      otherTotal += amount;
-    } else {
-      groupedExpenseBreakdown[name] = amount;
-    }
-  }
-
-  if (otherTotal > 0) {
-    groupedExpenseBreakdown["Other"] = otherTotal;
-  }
+  const groupedExpenseBreakdown = groupReportExpenses(expenseBreakdown);
 
   // Create chart data for pie chart
   const chartEntries = Object.entries(groupedExpenseBreakdown);
@@ -136,6 +96,7 @@ const Reports: React.FC = () => {
 
   const downloadReportAsPDF = async () => {
     try {
+      const { FileSystem, IntentLauncher } = await loadExportModules();
       if (!FileSystem || !FileSystem.documentDirectory) {
         Alert.alert(
           "Not Available",
@@ -149,66 +110,9 @@ const Reports: React.FC = () => {
         : "N/A";
       const formattedEndDate = endDate ? endDate.toLocaleDateString() : "N/A";
 
-      const html = `
-        <html>
-          <head>
-            <style>
-              body { font-family: Arial; padding: 24px; color: #333; }
-              h2, h3 { color: #222; }
-              .section { margin-bottom: 24px; }
-              .item-row { display: flex; justify-content: space-between; padding: 4px 0; }
-              .label { font-weight: bold; }
-              img { max-width: 100%; margin-top: 10px; }
-            </style>
-          </head>
-          <body>
-            <h2>Budget Report</h2>
-            <p><strong>Start:</strong> ${formattedStartDate}</p>
-            <p><strong>End:</strong> ${formattedEndDate}</p>
-  
-            <div class="section">
-              <h3>Income Summary</h3>
-              <p>Total Income: ${symbol}${totalIncome.toFixed(decimals)}</p>
-              ${Object.entries(incomeBreakdown)
-                .map(
-                  ([name, amount]) =>
-                    `<div class="item-row"><span>${name}</span><span>${symbol}${amount.toFixed(
-                      decimals
-                    )}</span></div>`
-                )
-                .join("")}
-            </div>
-  
-            <div class="section">
-              <h3>Expense Summary</h3>
-              <p>Total Expenses: ${symbol}${totalExpenses.toFixed(decimals)}</p>
-              ${Object.entries(groupedExpenseBreakdown)
-                .map(
-                  ([name, amount]) =>
-                    `<div class="item-row"><span>${name}</span><span>${symbol}${amount.toFixed(
-                      decimals
-                    )}</span></div>`
-                )
-                .join("")}
-            </div>
-  
-            <div class="section">
-              <h3>Remaining Balances</h3>
-              <p>Total: ${symbol}${totalRemainingBalance.toFixed(decimals)}</p>
-              ${filteredBudgets
-                .map(
-                  (b) =>
-                    `<div class="item-row"><span>${
-                      b.income.name
-                    }</span><span>${symbol}${b.remainingBalance.toFixed(
-                      decimals
-                    )}</span></div>`
-                )
-                .join("")}
-            </div>
-          </body>
-        </html>
-      `;
+      const html = buildReportHtml({ formattedStartDate, formattedEndDate, symbol, decimals,
+        totalIncome, incomeBreakdown, totalExpenses, totalUnfunded, unfunded,
+        groupedExpenseBreakdown, totalRemainingBalance, filteredBudgets });
 
       const file = await printToFileAsync({ html, base64: false });
 
@@ -339,7 +243,7 @@ const Reports: React.FC = () => {
       )}
 
       {filtersApplied ? (
-        filteredBudgets.length > 0 ? (
+        filteredBudgets.length > 0 || expenseCount > 0 ? (
           <View style={styles.summaryContainer}>
             <Text style={[styles.sectionTitle, { color: colorScheme.text }]}>
               Income Summary
@@ -351,7 +255,7 @@ const Reports: React.FC = () => {
               {totalIncome.toFixed(decimals)}
             </Text>
 
-            <BarChart
+            {incomeChartData.labels.length > 0 && <BarChart
               data={incomeChartData}
               width={screenWidth - 32}
               height={220}
@@ -367,7 +271,7 @@ const Reports: React.FC = () => {
               yAxisLabel={symbol}
               yAxisSuffix={symbol}
               yAxisInterval={100}
-            />
+            />}
 
             <Text
               style={[
@@ -384,6 +288,15 @@ const Reports: React.FC = () => {
               Total Expenses: {symbol}
               {totalExpenses.toFixed(decimals)}
             </Text>
+
+            {unfunded.length > 0 && <View>
+              <Text style={[styles.summaryText, { color: colorScheme.negativeBalance }]}>
+                Unfunded expenses: {symbol}{totalUnfunded.toFixed(decimals)}
+              </Text>
+              {unfunded.map(item => <Text key={item.id} style={{ color: colorScheme.text }}>
+                {item.expense.name}: {symbol}{item.amount.toFixed(decimals)} · Needs {symbol}{item.shortfall.toFixed(decimals)} more in one earlier budget.
+              </Text>)}
+            </View>}
 
             <PieChart
               data={expenseChartData}
@@ -450,7 +363,7 @@ const Reports: React.FC = () => {
                   { color: colorScheme.summaryAmount },
                 ]}
               >
-                Total Remaining Balance: {symbol}
+                Remaining in allocated budgets: {symbol}
                 {totalRemainingBalance.toFixed(decimals)}
               </Text>
               {filteredBudgets.map((budget) => (

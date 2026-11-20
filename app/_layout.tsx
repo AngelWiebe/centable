@@ -1,3 +1,4 @@
+import { useShallow } from "zustand/react/shallow";
 import {
   DarkTheme,
   DefaultTheme,
@@ -12,11 +13,18 @@ import "react-native-reanimated";
 
 import { Colors } from "../constants/Colors";
 import useBudgetStore from "../store/useBudgetStore";
+import { useBudgetCalendarRefresh } from "../hooks/useBudgetCalendarRefresh";
 
 SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
-  const { settings, fetchAndCleanBudgets } = useBudgetStore();
+  useBudgetCalendarRefresh();
+  const { settings, fetchAndCleanBudgets } = useBudgetStore(
+    useShallow(state => ({
+      settings: state.settings,
+      fetchAndCleanBudgets: state.fetchAndCleanBudgets,
+    }))
+  );
   const colorScheme = settings?.theme === "dark" ? Colors.dark : Colors.light;
 
   const [loaded] = useFonts({
@@ -28,7 +36,7 @@ export default function RootLayout() {
     fetchAndCleanBudgets().catch((error) =>
       console.error("❌ Failed to load data:", error)
     );
-  }, []);
+  }, [fetchAndCleanBudgets]);
 
   useEffect(() => {
     if (loaded) {

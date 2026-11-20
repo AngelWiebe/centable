@@ -1,8 +1,10 @@
+import { useShallow } from "zustand/react/shallow";
 import { MaterialIcons } from "@expo/vector-icons";
 import React, { useMemo, useState } from "react";
 import {
   AccessibilityInfo,
   ActivityIndicator,
+  Alert,
   Modal,
   Pressable,
   StyleSheet,
@@ -34,7 +36,7 @@ function parseMonthValue(
   return { month, year };
 }
 
-const BudgetFilter: React.FC<{}> = ({}) => {
+const BudgetFilter: React.FC = () => {
   const {
     selectedMonth,
     selectedYear,
@@ -42,7 +44,16 @@ const BudgetFilter: React.FC<{}> = ({}) => {
     setSelectedYear,
     settings,
     refreshBudgets,
-  } = useBudgetStore();
+  } = useBudgetStore(
+    useShallow(state => ({
+      selectedMonth: state.selectedMonth,
+      selectedYear: state.selectedYear,
+      setSelectedMonth: state.setSelectedMonth,
+      setSelectedYear: state.setSelectedYear,
+      settings: state.settings,
+      refreshBudgets: state.refreshBudgets,
+    }))
+  );
 
   const [loading, setLoading] = useState(false);
   const [monthListOpen, setMonthListOpen] = useState(false);
@@ -93,8 +104,9 @@ const BudgetFilter: React.FC<{}> = ({}) => {
     try {
       await refreshBudgets();
       AccessibilityInfo.announceForAccessibility("Budgets recalculated.");
-    } catch (error) {
-      console.error("Recalculation error:", error);
+    } catch {
+      AccessibilityInfo.announceForAccessibility("Budget refresh failed. Your previous budgets are unchanged.");
+      Alert.alert("Unable to refresh budgets", "Your previous budgets are unchanged. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -178,6 +190,9 @@ const BudgetFilter: React.FC<{}> = ({}) => {
           { backgroundColor: colorScheme.submitButton },
         ]}
         disabled={loading}
+        accessibilityRole="button"
+        accessibilityLabel="Refresh budgets"
+        accessibilityState={{ disabled: loading, busy: loading }}
       >
         {loading ? (
           <ActivityIndicator size="small" color={colorScheme.text} />

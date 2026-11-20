@@ -1,6 +1,6 @@
+import { useShallow } from "zustand/react/shallow";
 import React from "react";
 import {
-  AccessibilityInfo,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -25,7 +25,11 @@ const ListItem: React.FC<ListItemInterface> = ({
   handleEdit,
   handleDelete,
 }) => {
-  const { settings } = useBudgetStore();
+  const { settings } = useBudgetStore(
+    useShallow(state => ({
+      settings: state.settings,
+    }))
+  );
   const theme = settings?.theme ?? "dark";
   const colorScheme = Colors[theme];
   const { symbol, decimals } = currencySettings[settings?.currency || "CAD"];
@@ -34,16 +38,10 @@ const ListItem: React.FC<ListItemInterface> = ({
     ? getNextOccurrenceDate(new Date(item.date), item.frequency)
     : new Date(item.date);
 
-  const handleDeletePress = (id: string) => {
-    handleDelete(id);
-    AccessibilityInfo.announceForAccessibility("Item deleted");
-  };
-
   return (
     <View
       style={[styles.card, { backgroundColor: colorScheme.background }]}
-      accessible={true}
-      accessibilityRole="list"
+      accessible={false}
     >
       <View style={styles.row}>
         <Text
@@ -96,7 +94,7 @@ const ListItem: React.FC<ListItemInterface> = ({
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
-          onPress={() => handleDeletePress(item.id)}
+          onPress={() => handleDelete(item.id)}
           style={[
             styles.deleteButton,
             { backgroundColor: colorScheme.resetButton },

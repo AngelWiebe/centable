@@ -1,5 +1,5 @@
 import { FrequencyInterface } from "../types/frequency";
-import { iterateOccurrences } from "./occurrenceDates";
+import { iterateOccurrences, toLocalDay } from "./occurrenceDates";
 
 export const generateOccurrences = <
   T extends { id: string; date: string | Date; frequency?: FrequencyInterface }
@@ -8,9 +8,9 @@ export const generateOccurrences = <
   endDate: string | Date,
   startDate?: string | Date
 ): T[] => {
-  const rangeEnd = new Date(endDate);
+  const rangeEnd = toLocalDay(endDate);
   const rangeStart = startDate
-    ? new Date(startDate)
+    ? toLocalDay(startDate)
     : new Date(rangeEnd.getFullYear(), rangeEnd.getMonth() - 1, 1);
 
   return items.flatMap((item) =>

@@ -16,7 +16,7 @@ const Budget: React.FC = () => {
         styles.container,
         { backgroundColor: colorScheme.cardBackground },
       ]}
-      accessible={true}
+      accessible={false}
     >
       <BudgetFilter />
       <BudgetList />

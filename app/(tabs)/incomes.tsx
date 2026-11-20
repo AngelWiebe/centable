@@ -1,6 +1,6 @@
-import React, { useCallback, useMemo, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
+import React, { useCallback } from "react";
 import {
-  Alert,
   FlatList,
   StyleSheet,
   Text,
@@ -13,73 +13,23 @@ import FinancialForm from "../../components/FinancialForm";
 import ListItem from "../../components/ListItem";
 import { Colors } from "../../constants/Colors";
 import { IncomeInterface } from "../../types/income";
-import { normalizeFrequency } from "../../utils/normalizeFrequency";
+import { useFinancialEntryForm } from "../../hooks/useFinancialEntryForm";
 
-const Incomes: React.FC = React.memo(() => {
-  const { incomes, addOrUpdateIncome, deleteIncome, settings } =
-    useBudgetStore();
+const Incomes: React.FC = React.memo(function Incomes() {
+  const { incomes, addOrUpdateIncome, deleteIncome, settings } = useBudgetStore(
+    useShallow(state => ({
+      incomes: state.incomes,
+      addOrUpdateIncome: state.addOrUpdateIncome,
+      deleteIncome: state.deleteIncome,
+      settings: state.settings,
+    }))
+  );
   const colorScheme = settings?.theme === "dark" ? Colors.dark : Colors.light;
 
-  const [incomeForm, setIncomeForm] = useState<Partial<IncomeInterface>>({});
-  const [isEditing, setIsEditing] = useState<boolean>(false);
-  const [showForm, setShowForm] = useState<boolean>(false);
-  const [showDatePicker, setShowDatePicker] = useState<boolean>(false);
-
-  const resetForm = useCallback(() => {
-    setIncomeForm({});
-    setIsEditing(false);
-    setShowForm(false);
-  }, []);
-
-  const handleAddOrUpdateIncome = useCallback(
-    async (data: Partial<IncomeInterface>) => {
-      if (!data.name || !data.date || data.amount === undefined) {
-        Alert.alert("Error", "Please fill in the required fields.");
-        return;
-      }
-
-      await addOrUpdateIncome({
-        ...data,
-        frequency: normalizeFrequency(data.frequency),
-      });
-
-      resetForm();
-    },
-    [addOrUpdateIncome, resetForm]
-  );
-
-  const handleDateChange = useCallback((event: any, date?: Date) => {
-    if (event.type === "set" && date) {
-      setIncomeForm((prevForm) => ({ ...prevForm, date }));
-    }
-    setShowDatePicker(false);
-  }, []);
-
-  const handleEdit = useCallback((income: IncomeInterface) => {
-    setIncomeForm(income);
-    setIsEditing(true);
-    setShowForm(true);
-  }, []);
-
-  const handleDelete = useCallback(
-    (id: string) => {
-      Alert.alert(
-        "Confirm Delete",
-        "Are you sure you want to delete this income?",
-        [
-          { text: "Cancel", style: "cancel" },
-          {
-            text: "Delete",
-            style: "destructive",
-            onPress: async () => {
-              await deleteIncome(id);
-            },
-          },
-        ]
-      );
-    },
-    [deleteIncome]
-  );
+  const { formData: incomeForm, setFormData: setIncomeForm, isEditing,
+    showForm, setShowForm, showDatePicker, setShowDatePicker, resetForm,
+    handleSubmit: handleAddOrUpdateIncome, handleDateChange, handleEdit, handleDelete,
+  } = useFinancialEntryForm("income", addOrUpdateIncome, deleteIncome);
 
   const renderIncomeItem = useCallback(
     ({ item }: { item: IncomeInterface }) => (
@@ -92,7 +42,6 @@ const Incomes: React.FC = React.memo(() => {
     [handleEdit, handleDelete]
   );
 
-  const memoizedIncomes = useMemo(() => incomes, [incomes]);
 
   return (
     <View
@@ -128,7 +77,7 @@ const Incomes: React.FC = React.memo(() => {
           </TouchableOpacity>
 
           <FlatList
-            data={memoizedIncomes}
+            data={incomes}
             renderItem={renderIncomeItem}
             keyExtractor={(item) => item.id}
             contentContainerStyle={styles.listContent}

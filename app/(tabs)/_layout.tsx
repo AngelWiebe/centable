@@ -1,3 +1,4 @@
+import { useShallow } from "zustand/react/shallow";
 import { MaterialIcons } from "@expo/vector-icons";
 import { Tabs, useRouter } from "expo-router";
 import { Image, Platform, TouchableOpacity } from "react-native";
@@ -8,7 +9,11 @@ import { Colors } from "../../constants/Colors";
 import useBudgetStore from "../../store/useBudgetStore";
 
 export default function TabLayout() {
-  const { settings } = useBudgetStore();
+  const { settings } = useBudgetStore(
+    useShallow(state => ({
+      settings: state.settings,
+    }))
+  );
   const colorScheme = settings?.theme === "dark" ? Colors.dark : Colors.light;
   const router = useRouter();
 
@@ -43,7 +48,9 @@ export default function TabLayout() {
         headerLeft: () => (
           <TouchableOpacity
             onPress={() => router.push("/")}
-            style={{ marginLeft: 15 }}
+            style={{ marginLeft: 15, minWidth: 44, minHeight: 44, justifyContent: "center", alignItems: "center" }}
+            accessibilityRole="button"
+            accessibilityLabel="Open recommendations"
           >
             <Image
               source={require("../../assets/images/icon.png")}
@@ -55,7 +62,9 @@ export default function TabLayout() {
         headerRight: () => (
           <TouchableOpacity
             onPress={() => router.push("/settings")}
-            style={{ marginRight: 15 }}
+            style={{ marginRight: 15, minWidth: 44, minHeight: 44, justifyContent: "center", alignItems: "center" }}
+            accessibilityRole="button"
+            accessibilityLabel="Open settings"
           >
             <MaterialIcons name="settings" size={28} color={colorScheme.text} />
           </TouchableOpacity>

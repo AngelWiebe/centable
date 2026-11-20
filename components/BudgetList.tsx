@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
+import React, { useContext, useEffect, useMemo, useRef, useState } from "react";
 import { AccessibilityInfo, StyleSheet, Text, View } from "react-native";
 import {
   FlatList,
@@ -7,31 +8,38 @@ import {
 
 import useBudgetStore from "../store/useBudgetStore";
 import { Colors } from "../constants/Colors";
+import { budgetMatchesMonth } from "../utils/buildBudgets";
 import { StoredBudget } from "../types/budget";
 import BudgetItem from "./BudgetItem";
+import UnfundedExpenses from "./UnfundedExpenses";
+import { BudgetDragProvider, BudgetDropTarget, BudgetDragListContext } from "./BudgetDragContext";
 import { BudgetScrollContext } from "./BudgetScrollContext";
 
-const BudgetList: React.FC<{}> = ({}) => {
-  const { budgets, selectedMonth, selectedYear, settings } = useBudgetStore();
+function BudgetListContent({ listRef }: { listRef: React.RefObject<React.ComponentRef<typeof FlatList<StoredBudget>> | null> }) {
+  const dragEvents = useContext(BudgetDragListContext)!;
+  const { budgets, selectedMonth, selectedYear, settings, loadError } = useBudgetStore(
+    useShallow(state => ({
+      budgets: state.budgets,
+      selectedMonth: state.selectedMonth,
+      selectedYear: state.selectedYear,
+      settings: state.settings,
+      loadError: state.loadError,
+    }))
+  );
   const colorScheme = settings?.theme === "dark" ? Colors.dark : Colors.light;
 
   const filteredBudgets = useMemo(() => {
     const filtered = budgets
-      .filter((budget: StoredBudget) => {
-        const budgetDate = new Date(budget.date);
-
-        return (
-          budgetDate.getMonth() + 1 === selectedMonth &&
-          budgetDate.getFullYear() === selectedYear
-        );
-      })
+      .filter((budget: StoredBudget) => budgetMatchesMonth(budget, selectedMonth, selectedYear))
       .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
     return filtered;
   }, [budgets, selectedMonth, selectedYear]);
 
   useEffect(() => {
-    if (filteredBudgets.length === 0) {
+    if (loadError) {
+      AccessibilityInfo.announceForAccessibility(loadError);
+    } else if (filteredBudgets.length === 0) {
       AccessibilityInfo.announceForAccessibility(
         "No budgets found for the selected month and year."
       );
@@ -40,55 +48,74 @@ const BudgetList: React.FC<{}> = ({}) => {
         `${filteredBudgets.length} budgets found for the selected month and year.`
       );
     }
-  }, [filteredBudgets]);
+  }, [filteredBudgets, loadError]);
 
-  const listRef = useRef(null);
   const [scrollEnabled, setScrollEnabled] = useState(true);
   const scroll = useMemo(
     () => ({ listRef, setScrollEnabled }),
-    []
+    [listRef]
   );
   const renderItem = ({ item }: { item: StoredBudget }) => (
-    <BudgetItem budget={item} />
+    <BudgetDropTarget budgetId={item.id}><BudgetItem budget={item} /></BudgetDropTarget>
   );
 
-  if (filteredBudgets.length === 0) {
-    return (
-      <View
-        style={[
-          styles.noBudgetsContainer,
-          { backgroundColor: colorScheme.cardBackground },
-        ]}
-        accessible={true}
-        accessibilityLiveRegion="polite"
-        accessibilityLabel="No budgets available"
-      >
-        <Text style={[styles.noBudgetsText, { color: colorScheme.text }]}>
-          No budgets found for the selected month and year.
-        </Text>
-      </View>
-    );
-  }
+  const emptyList = (
+    <View
+      style={[
+        styles.noBudgetsContainer,
+        { backgroundColor: colorScheme.cardBackground },
+      ]}
+      accessible={true}
+      accessibilityLiveRegion="polite"
+      accessibilityLabel="No budgets available"
+    >
+      <Text style={[styles.noBudgetsText, { color: colorScheme.text }]}>
+        No budgets found for the selected month and year.
+      </Text>
+    </View>
+  );
 
   return (
-    <GestureHandlerRootView style={styles.container}>
       <BudgetScrollContext.Provider value={scroll}>
         <FlatList
           ref={listRef}
+          onScroll={dragEvents.onScroll}
+          scrollEventThrottle={16}
+          onContentSizeChange={dragEvents.onContentSizeChange}
+          removeClippedSubviews={false}
+          // Keep this month's cards mounted so a dragged row survives edge scrolling.
+          initialNumToRender={filteredBudgets.length}
+          maxToRenderPerBatch={Math.max(10, filteredBudgets.length)}
+          windowSize={Math.max(21, filteredBudgets.length * 5)}
           scrollEnabled={scrollEnabled}
           contentContainerStyle={{ flexGrow: 1 }}
           style={{ flex: 1 }}
+          ListHeaderComponent={<>
+            {loadError && <Text accessibilityRole="alert" style={{ color: colorScheme.negativeBalance, padding: 16 }}>{loadError}</Text>}
+            {filteredBudgets.length > 0 && <Text style={{ color: colorScheme.text, paddingBottom: 12 }}>Hold an expense to drag it, or use its options button to reorder or move it.</Text>}
+            <UnfundedExpenses />
+          </>}
+          ListEmptyComponent={loadError ? undefined : emptyList}
           data={filteredBudgets}
           renderItem={renderItem}
           keyExtractor={(item) => item.id}
-          accessible={true}
+          accessible={false}
           accessibilityRole="list"
-          accessibilityLabel="Filtered budget list"
+          keyboardShouldPersistTaps="handled"
+          automaticallyAdjustKeyboardInsets
         />
       </BudgetScrollContext.Provider>
-    </GestureHandlerRootView>
   );
 };
+
+function BudgetList() {
+  const listRef = useRef<React.ComponentRef<typeof FlatList<StoredBudget>>>(null);
+  return <GestureHandlerRootView style={styles.container}>
+    <BudgetDragProvider listRef={listRef}>
+      <BudgetListContent listRef={listRef} />
+    </BudgetDragProvider>
+  </GestureHandlerRootView>;
+}
 
 const styles = StyleSheet.create({
   container: {

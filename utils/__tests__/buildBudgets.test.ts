@@ -546,6 +546,54 @@ describe("buildBudgets", () => {
     ).toBe(true);
   });
 
+  it("keeps an expense that was added directly on a budget", () => {
+    const periodStart = new Date(2026, 7, 1);
+    const periodEnd = new Date(2026, 10, 30, 23, 59, 59, 999);
+    const original = buildBudgets(
+      [income({ id: "pay", date: new Date(2026, 8, 1), amount: 2000 })],
+      [expense({ id: "rent", date: new Date(2026, 8, 1), amount: 500 })],
+      periodStart,
+      periodEnd
+    );
+    const september = original.find((budget) => dayKey(budget.date) === "2026-09-01");
+    if (!september) throw new Error("missing September budget");
+
+    september.bills.push({
+      id: "coffee-bill",
+      amount: 42.5,
+      paid: true,
+      sort_order: september.bills.length,
+      expense: {
+        id: "manual:coffee-bill",
+        name: "Coffee",
+        date: new Date(2026, 8, 3, 12),
+        amount: 42.5,
+        frequency: undefined,
+      },
+    });
+
+    const rebuilt = buildBudgets(
+      [income({ id: "pay", date: new Date(2026, 8, 1), amount: 2000 })],
+      [expense({ id: "rent", date: new Date(2026, 8, 1), amount: 500 })],
+      periodStart,
+      periodEnd,
+      original
+    );
+    const septemberBills =
+      rebuilt.find((budget) => dayKey(budget.date) === "2026-09-01")?.bills ?? [];
+    const coffee = septemberBills.find((bill) => bill.id === "coffee-bill");
+
+    expect(coffee?.expense.name).toBe("Coffee");
+    expect(coffee?.amount).toBe(42.5);
+    expect(coffee?.paid).toBe(true);
+    expect(septemberBills.filter((bill) => bill.id === "coffee-bill")).toHaveLength(1);
+    expect(
+      rebuilt
+        .filter((budget) => dayKey(budget.date) !== "2026-09-01")
+        .every((budget) => budget.bills.every((bill) => bill.id !== "coffee-bill"))
+    ).toBe(true);
+  });
+
   it("keeps a paid flag for the same income and expense occurrence", () => {
     const [first] = buildBudgets(
       [income({ id: "pay", date: new Date(2026, 8, 1), amount: 2000 })],

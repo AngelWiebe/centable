@@ -1,3 +1,4 @@
+import { useShallow } from "zustand/react/shallow";
 import { MaterialIcons } from "@expo/vector-icons";
 import { Picker } from "@react-native-picker/picker";
 import { debounce } from "lodash";
@@ -9,7 +10,6 @@ import React, {
   useState,
 } from "react";
 import {
-  Alert,
   FlatList,
   KeyboardAvoidingView,
   Platform,
@@ -25,10 +25,15 @@ import FinancialForm from "../../components/FinancialForm";
 import ListItem from "../../components/ListItem";
 import { Colors } from "../../constants/Colors";
 import { ExpenseInterface } from "../../types/expense";
-import { normalizeFrequency } from "../../utils/normalizeFrequency";
+import { useFinancialEntryForm } from "../../hooks/useFinancialEntryForm";
 
-const Expenses: React.FC = React.memo(() => {
-  const { expenses, settings } = useBudgetStore();
+const Expenses: React.FC = React.memo(function Expenses() {
+  const { expenses, settings } = useBudgetStore(
+    useShallow(state => ({
+      expenses: state.expenses,
+      settings: state.settings,
+    }))
+  );
   const addOrUpdateExpense = useBudgetStore(
     (state) => state.addOrUpdateExpense
   );
@@ -36,88 +41,30 @@ const Expenses: React.FC = React.memo(() => {
   const loadExpenses = useBudgetStore((state) => state.getExpenses);
   const colorScheme = settings?.theme === "dark" ? Colors.dark : Colors.light;
 
-  const [expenseForm, setExpenseForm] = useState<Partial<ExpenseInterface>>({});
-  const [isEditing, setIsEditing] = useState<boolean>(false);
-  const [showForm, setShowForm] = useState<boolean>(false);
-  const [showDatePicker, setShowDatePicker] = useState<boolean>(false);
+  const { formData: expenseForm, setFormData: setExpenseForm, isEditing,
+    showForm, setShowForm, showDatePicker, setShowDatePicker, resetForm,
+    handleSubmit: handleAddOrUpdateExpense, handleDateChange, handleEdit, handleDelete,
+  } = useFinancialEntryForm("expense", addOrUpdateExpense, deleteExpense);
+
   const [error, setError] = useState<string | null>(null);
   const [filterOption, setFilterOption] = useState<"date" | "name">("date");
   const [searchTerm, setSearchTerm] = useState<string>("");
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState<string>("");
 
-  const memoizedLoadExpenses = useCallback(
-    () => loadExpenses(),
-    [loadExpenses]
-  );
+  const memoizedLoadExpenses = useCallback(() => loadExpenses().then(
+    () => setError(null),
+    () => setError("Failed to load expenses. Please try again later.")
+  ), [loadExpenses]);
 
   useEffect(() => {
-    const load = async () => {
-      try {
-        await memoizedLoadExpenses();
-      } catch (e) {
-        setError("Failed to load expenses. Please try again later.");
-      }
-    };
-    load();
+    void memoizedLoadExpenses();
   }, [memoizedLoadExpenses]);
 
-  // Debounce the search term
-  const handleSearchChange = debounce((text: string) => {
+  const handleSearchChange = useMemo(() => debounce((text: string) => {
     setDebouncedSearchTerm(text);
-  }, 300);
+  }, 300), []);
 
-  const resetForm = useCallback(() => {
-    setExpenseForm({});
-    setIsEditing(false);
-    setShowForm(false);
-  }, []);
-
-  const handleAddOrUpdateExpense = useCallback(
-    async (data: Partial<ExpenseInterface>) => {
-      if (!data.name || !data.date || data.amount === undefined) {
-        Alert.alert("Error", "Please fill in the required fields.");
-        return;
-      }
-
-      await addOrUpdateExpense({
-        ...data,
-        frequency: normalizeFrequency(data.frequency),
-      });
-      resetForm();
-    },
-    [addOrUpdateExpense, resetForm]
-  );
-
-  const handleDateChange = useCallback((event: any, date?: Date) => {
-    if (event.type === "set" && date) {
-      setExpenseForm((prevForm) => ({ ...prevForm, date }));
-    }
-    setShowDatePicker(false);
-  }, []);
-
-  const handleEdit = useCallback((expense: ExpenseInterface) => {
-    setExpenseForm(expense);
-    setIsEditing(true);
-    setShowForm(true);
-  }, []);
-
-  const handleDelete = useCallback(
-    (id: string) => {
-      Alert.alert(
-        "Confirm Delete",
-        "Are you sure you want to delete this expense?",
-        [
-          { text: "Cancel", style: "cancel" },
-          {
-            text: "Delete",
-            style: "destructive",
-            onPress: () => deleteExpense(id),
-          },
-        ]
-      );
-    },
-    [deleteExpense]
-  );
+  useEffect(() => () => handleSearchChange.cancel(), [handleSearchChange]);
 
   const renderExpenseItem = useCallback(
     ({ item }: { item: ExpenseInterface }) => (
@@ -215,6 +162,7 @@ const Expenses: React.FC = React.memo(() => {
                   },
                 ]}
                 placeholder="Search expenses..."
+                accessibilityLabel="Search expenses"
                 placeholderTextColor={colorScheme.text}
                 value={searchTerm}
                 onChangeText={(text) => {
@@ -239,6 +187,7 @@ const Expenses: React.FC = React.memo(() => {
                 style={styles.pickerIcon}
               />
               <Picker
+                accessibilityLabel="Sort expenses"
                 selectedValue={filterOption}
                 onValueChange={(itemValue: SetStateAction<"name" | "date">) =>
                   setFilterOption(itemValue)
